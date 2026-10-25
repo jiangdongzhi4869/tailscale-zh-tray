@@ -1,0 +1,14 @@
+# 编译输出
+bin/
+obj/
+dist/
+dist_*/
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# 日志
+*.log
+开发记录_*.md

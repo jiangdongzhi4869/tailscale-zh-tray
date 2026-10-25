@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>TailscaleZHTray</AssemblyName>
+    <RootNamespace>TailscaleZHTray</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>assets\TailscaleZHTray.ico</ApplicationIcon>
+    <PlatformTarget>x64</PlatformTarget>
+    <DebugType>none</DebugType>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+    <Version>1.2.1</Version>
+    <FileVersion>1.2.1.0</FileVersion>
+    <Product>Tailscale 中文托盘</Product>
+    <AssemblyTitle>Tailscale 中文托盘</AssemblyTitle>
+    <Company>本地自制</Company>
+  </PropertyGroup>
+
+</Project>
