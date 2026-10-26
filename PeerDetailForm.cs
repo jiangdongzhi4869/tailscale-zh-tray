@@ -27,7 +27,7 @@ internal sealed class PeerDetailForm : Form
 
         var info = new TableLayoutPanel
         {
-            Dock = DockStyle.Top,
+            Dock = DockStyle.Fill,
             Height = 210,
             ColumnCount = 2,
             Padding = new Padding(18, 14, 18, 10),
@@ -51,11 +51,9 @@ internal sealed class PeerDetailForm : Form
             ? (peer.ExitNode ? "当前正在使用" : "可作为出口节点")
             : "否");
 
-        Controls.Add(info);
-
         var bar = new FlowLayoutPanel
         {
-            Dock = DockStyle.Top,
+            Dock = DockStyle.Fill,
             Height = 46,
             Padding = new Padding(18, 8, 18, 6),
             BackColor = Color.FromArgb(247, 248, 250)
@@ -80,8 +78,6 @@ internal sealed class PeerDetailForm : Form
         };
         bar.Controls.Add(tip);
 
-        Controls.Add(bar);
-
         var panel = new Panel
         {
             Dock = DockStyle.Fill,
@@ -99,12 +95,24 @@ internal sealed class PeerDetailForm : Form
         _output.Text = "点击「Ping 测试」开始。";
         panel.Controls.Add(_output);
 
-        Controls.Add(panel);
+        // 用 TableLayoutPanel 固定三行布局，避免依赖控件 z-order（曾因 SendToBack
+        // 导致输出框被上面的信息区盖住，文字写在看不见的位置）
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            BackColor = Color.FromArgb(247, 248, 250)
+        };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 210));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        // Dock 顺序：先加的靠内，最后加的贴边，这里用 BringToFront 保证填充区在最下层
-        info.BringToFront();
-        bar.BringToFront();
-        panel.SendToBack();
+        layout.Controls.Add(info, 0, 0);
+        layout.Controls.Add(bar, 0, 1);
+        layout.Controls.Add(panel, 0, 2);
+
+        Controls.Add(layout);
     }
 
     private static string Safe(string value) =>
