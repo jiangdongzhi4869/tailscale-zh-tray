@@ -502,7 +502,9 @@ internal sealed class MainForm : Form
             return;
         }
 
-        _statusLabel.Text = $"上次刷新：{DateTime.Now:HH:mm:ss}    点「刷新」更新状态与延迟";
+        _statusLabel.Text =
+            $"上次刷新：{DateTime.Now:HH:mm:ss}    点「刷新」更新状态与延迟" +
+            $"（逐台测，每台间隔 {TrayAppContext.LatencyStepDelayMs / 1000} 秒）";
     }
 
     /// <summary>状态栏临时文字（例如正在测延迟）。</summary>
