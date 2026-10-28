@@ -480,7 +480,7 @@ internal sealed class MainForm : Form
         FillDeviceList(snapshot);
         UpdateSettings(snapshot);
 
-        _statusLabel.Text = $"上次刷新：{DateTime.Now:HH:mm:ss}    每 5 秒自动刷新";
+        _statusLabel.Text = $"上次刷新：{DateTime.Now:HH:mm:ss}    每 {TrayAppContext.RefreshIntervalSeconds} 秒自动刷新";
     }
 
     private void FillDeviceList(TailscaleSnapshot snapshot)

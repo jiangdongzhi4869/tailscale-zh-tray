@@ -18,6 +18,11 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private const string AdminConsoleUrl = "https://login.tailscale.com/admin/machines";
 
+    // 后台轮询间隔，主界面状态栏的文字也读这个值，避免改了一处忘了另一处
+    public const int RefreshIntervalMs = 60000;
+
+    public static int RefreshIntervalSeconds => RefreshIntervalMs / 1000;
+
     private readonly TailscaleClient _client = new();
     private readonly NotifyIcon _tray = new();
     private readonly ContextMenuStrip _menu = new();
@@ -50,7 +55,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _tray.Visible = true;
         _tray.DoubleClick += (_, _) => ShowMainForm();
 
-        _timer.Interval = 60000;
+        _timer.Interval = RefreshIntervalMs;
         _timer.Tick += async (_, _) => await RefreshAsync();
         _timer.Start();
 
