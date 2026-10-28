@@ -35,14 +35,6 @@ internal sealed class MainForm : Form
 
     private readonly Dictionary<string, CheckBox> _settingChecks = new();
 
-    // 悬停说明：AutoPopDelay 给长一点，别没看完就消失
-    private readonly ToolTip _settingTips = new()
-    {
-        AutoPopDelay = 20000,
-        InitialDelay = 250,
-        ReshowDelay = 100,
-        ShowAlways = true
-    };
     private readonly Button _btnReset = new();
 
     private readonly Button _btnNetcheck = new();
@@ -294,9 +286,6 @@ internal sealed class MainForm : Form
                 Tag = spec
             };
             check.CheckedChanged += async (_, _) => await OnSettingChangedAsync(check);
-
-            if (!string.IsNullOrEmpty(spec.Hint))
-                _settingTips.SetToolTip(check, spec.Hint);
 
             page.Controls.Add(check);
             _settingChecks[spec.Id] = check;
