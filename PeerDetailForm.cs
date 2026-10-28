@@ -30,7 +30,7 @@ internal sealed class PeerDetailForm : Form
         var info = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Height = 210,
+            Height = 232,
             ColumnCount = 2,
             Padding = new Padding(18, 14, 18, 10),
             BackColor = Color.White,
@@ -45,6 +45,9 @@ internal sealed class PeerDetailForm : Form
         AddRow(info, "系统", Safe(peer.Os));
         AddRow(info, "状态", peer.Online ? "在线" : "离线");
         AddRow(info, "连接方式", peer.ConnectionText);
+        AddRow(info, "延迟", peer.Latency == null
+            ? "尚未测量"
+            : $"{peer.LatencyText}（{peer.Latency.At:HH:mm:ss} 测得，最近一次）");
         AddRow(info, "收发流量", peer.TrafficText);
         AddRow(info, "最后握手", peer.LastHandshake == default
             ? "—"
@@ -106,7 +109,7 @@ internal sealed class PeerDetailForm : Form
             RowCount = 3,
             BackColor = Color.FromArgb(247, 248, 250)
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 210));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 232));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
@@ -167,6 +170,10 @@ internal sealed class PeerDetailForm : Form
             $"=== tailscale ping {ip} ==={Environment.NewLine}" +
             (string.IsNullOrWhiteSpace(text) ? "(无输出)" : text) +
             (string.IsNullOrWhiteSpace(error) ? "" : $"{Environment.NewLine}{Environment.NewLine}[错误]{Environment.NewLine}{error}");
+
+        // 顺手把这次结果记为最新的延迟数据，设备列表那边也会跟着更新
+        if (result.Code == 0 && !string.IsNullOrWhiteSpace(text))
+            _peer.Latency = PingOutputParser.Parse(text);
 
         _btnPing.Enabled = true;
     }

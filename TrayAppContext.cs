@@ -23,10 +23,18 @@ internal sealed class TrayAppContext : ApplicationContext
 
     public static int RefreshIntervalSeconds => RefreshIntervalMs / 1000;
 
+    // 延迟探测：每轮只测一台在线设备，轮着来。20 台设备约 3 分钟转一圈，
+    // 不用把整轮 ping 塞进一次刷新里（那会让界面卡住十几秒）
+    public const int LatencyProbeIntervalMs = 10000;
+
+    public static int LatencyProbeIntervalSeconds => LatencyProbeIntervalMs / 1000;
+
     private readonly TailscaleClient _client = new();
     private readonly NotifyIcon _tray = new();
     private readonly ContextMenuStrip _menu = new();
     private readonly System.Windows.Forms.Timer _timer = new();
+    private readonly System.Windows.Forms.Timer _probeTimer = new();
+    private readonly Dictionary<string, PeerLatency> _latency = new();
     private readonly Dictionary<string, Icon> _icons = new();
     private readonly Dictionary<string, ToolStripMenuItem> _miSettings = new();
 
@@ -40,7 +48,9 @@ internal sealed class TrayAppContext : ApplicationContext
     private ContextMenuStrip _exitMenu;
     private TailscaleSnapshot _snap;
     private bool _busy;
+    private bool _probing;
     private bool _updatingMenu;
+    private int _probeCursor;
 
     public Icon AppIcon => GetIcon("normal");
 
@@ -58,6 +68,10 @@ internal sealed class TrayAppContext : ApplicationContext
         _timer.Interval = RefreshIntervalMs;
         _timer.Tick += async (_, _) => await RefreshAsync();
         _timer.Start();
+
+        _probeTimer.Interval = LatencyProbeIntervalMs;
+        _probeTimer.Tick += async (_, _) => await ProbeNextLatencyAsync();
+        _probeTimer.Start();
 
         _ = RefreshAsync();
 
@@ -175,11 +189,80 @@ internal sealed class TrayAppContext : ApplicationContext
         }
     }
 
+    private static string LatencyKey(PeerModel peer)
+    {
+        if (peer == null)
+            return null;
+        return string.IsNullOrWhiteSpace(peer.PrimaryIp) ? null : peer.PrimaryIp;
+    }
+
+    /// <summary>把已测到的延迟贴到当前快照上，界面直接读 PeerModel 即可。</summary>
+    private void AttachLatency(TailscaleSnapshot snapshot)
+    {
+        if (snapshot == null)
+            return;
+
+        foreach (var peer in snapshot.Peers)
+        {
+            var key = LatencyKey(peer);
+            if (key != null && _latency.TryGetValue(key, out var sample))
+                peer.Latency = sample;
+        }
+    }
+
+    private async Task ProbeNextLatencyAsync()
+    {
+        if (_probing)
+            return;
+
+        var snapshot = _snap;
+        if (snapshot == null || !snapshot.IsRunning || !_client.Available)
+            return;
+
+        var online = snapshot.Peers
+            .Where(p => p.Online && LatencyKey(p) != null)
+            .ToList();
+
+        if (online.Count == 0)
+            return;
+
+        if (_probeCursor >= online.Count)
+            _probeCursor = 0;
+
+        var peer = online[_probeCursor++ % online.Count];
+        var ip = LatencyKey(peer);
+
+        _probing = true;
+        try
+        {
+            // 发 3 个包：第一个常常还是 DERP 中继，最后一个多半已打洞成直连
+            var result = await Task.Run(() => _client.Ping(ip, 3, 12000));
+            var sample = PingOutputParser.Parse(result.Out);
+
+            var key = LatencyKey(peer);
+            if (key != null)
+                _latency[key] = sample;
+
+            AttachLatency(_snap);
+            _form?.RefreshLatencyColumn();
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("延迟探测失败: " + ex);
+        }
+        finally
+        {
+            _probing = false;
+        }
+    }
+
     private void Apply()
     {
         var snapshot = _snap;
         if (snapshot == null)
             return;
+
+        AttachLatency(snapshot);
 
         var (stateText, _, iconKey) = StateInfo(snapshot, _client.Available);
 
@@ -475,6 +558,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private void Quit()
     {
         _timer.Stop();
+        _probeTimer.Stop();
 
         try { _tray.Visible = false; _tray.Dispose(); } catch { }
 

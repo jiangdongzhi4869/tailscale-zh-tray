@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace TailscaleZHTray;
@@ -25,15 +27,33 @@ internal sealed class PeerModel
     public long TxBytes;
     public DateTimeOffset LastHandshake;
 
+    /// <summary>最近一次 ping 测得的延迟，null 表示还没测过。</summary>
+    public PeerLatency Latency;
+
+    public string LatencyText =>
+        Latency == null ? "—" : Latency.TimedOut ? "超时" : Latency.Ms < 0 ? "—" : $"{Latency.Ms} ms";
+
     public string DisplayName =>
         !string.IsNullOrWhiteSpace(HostName) ? HostName.Trim() : (DnsName ?? "").Trim();
 
     public string PrimaryIp =>
         Ips.FirstOrDefault(x => x.Contains('.')) ?? Ips.FirstOrDefault() ?? "";
 
-    public string ConnectionText =>
-        !string.IsNullOrWhiteSpace(CurAddr) ? "直连" :
-        !string.IsNullOrWhiteSpace(Relay) ? "DERP " + Relay : "—";
+    public string ConnectionText
+    {
+        get
+        {
+            // ping 实测到的路径比 status 字段更可信：打洞成功后 status 未必立刻更新
+            if (Latency != null && !Latency.TimedOut && !string.IsNullOrWhiteSpace(Latency.Path))
+                return Latency.Relay ? "中继 " + Latency.Path : "直连";
+
+            if (!string.IsNullOrWhiteSpace(CurAddr))
+                return "直连";
+            if (!string.IsNullOrWhiteSpace(Relay))
+                return "中继 " + Relay;
+            return "—";
+        }
+    }
 
     public string TrafficText => $"↓ {FormatBytes(RxBytes)}  ↑ {FormatBytes(TxBytes)}";
 
@@ -49,6 +69,75 @@ internal sealed class PeerModel
             unit++;
         }
         return unit == 0 ? $"{value:0} {units[unit]}" : $"{value:0.0} {units[unit]}";
+    }
+}
+
+internal sealed class PeerLatency
+{
+    public int Ms = -1;
+    public bool Relay;
+    public string Path = "";
+    public bool TimedOut;
+    public DateTime At = DateTime.Now;
+}
+
+internal static class PingOutputParser
+{
+    // 实测输出（三种单位都可能出现）：
+    //   pong from pc (100.x.x.x) via DERP(sfo) in 1.908s
+    //   pong from pc (100.x.x.x) via DERP(sfo) in 405ms
+    //   pong from pc (100.x.x.x) via [240e:...]:41641 in 43ms
+    private static readonly Regex PongRegex = new(
+        @"via\s+(?<via>.+?)\s+in\s+(?<val>[0-9]+(?:\.[0-9]+)?)\s*(?<unit>ns|us|µs|ms|s)\b",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>取最后一次成功的 pong —— 多发包时最后一次通常是打洞成功后的直连。</summary>
+    public static PeerLatency Parse(string output)
+    {
+        var result = new PeerLatency { At = DateTime.Now };
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            result.TimedOut = true;
+            return result;
+        }
+
+        var matches = PongRegex.Matches(output);
+        if (matches.Count == 0)
+        {
+            result.TimedOut = true;
+            return result;
+        }
+
+        var match = matches[matches.Count - 1];
+        var via = match.Groups["via"].Value.Trim();
+
+        if (via.StartsWith("DERP", StringComparison.OrdinalIgnoreCase))
+        {
+            result.Relay = true;
+            var open = via.IndexOf('(');
+            var close = via.LastIndexOf(')');
+            result.Path = open >= 0 && close > open ? via.Substring(open + 1, close - open - 1) : via;
+        }
+        else
+        {
+            result.Path = via;
+        }
+
+        if (double.TryParse(match.Groups["val"].Value, NumberStyles.Float,
+                CultureInfo.InvariantCulture, out var value))
+        {
+            var ms = match.Groups["unit"].Value switch
+            {
+                "s" => value * 1000,
+                "ms" => value,
+                "us" or "µs" => value / 1000,
+                "ns" => value / 1_000_000,
+                _ => value
+            };
+            result.Ms = (int)Math.Round(ms);
+        }
+
+        return result;
     }
 }
 
@@ -282,8 +371,8 @@ internal sealed class TailscaleClient
 
     public (int Code, string Out, string Err) Logout() => Run("logout", 20000);
 
-    public (int Code, string Out, string Err) Ping(string host, int count = 4) =>
-        Run($"ping --c {count} {host}", 30000);
+    public (int Code, string Out, string Err) Ping(string host, int count = 4, int timeoutMs = 30000) =>
+        Run($"ping --c {count} {host}", timeoutMs);
 
     public (int Code, string Out, string Err) Netcheck() =>
         Run("netcheck --format json", 60000);

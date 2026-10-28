@@ -223,13 +223,20 @@ internal sealed class MainForm : Form
         _list.MultiSelect = false;
         _list.BorderStyle = BorderStyle.FixedSingle;
         _list.BackColor = Color.White;
-        _list.Columns.Add("设备", 220);
-        _list.Columns.Add("地址", 150);
-        _list.Columns.Add("系统", 90);
-        _list.Columns.Add("状态", 70);
-        _list.Columns.Add("连接方式", 110);
-        _list.Columns.Add("收发流量", 180);
+        _list.Columns.Add("设备", 210);
+        _list.Columns.Add("地址", 145);
+        _list.Columns.Add("系统", 85);
+        _list.Columns.Add("状态", 60);
+        _list.Columns.Add("连接方式", 120);
+        _list.Columns.Add("延迟", 75);
+        _list.Columns.Add("收发流量", 160);
         _list.DoubleClick += (_, _) => OpenSelectedPeer();
+
+        // 拖文件到设备行 = 直接用 Taildrop 发送
+        _list.AllowDrop = true;
+        _list.DragEnter += OnListDragOver;
+        _list.DragOver += OnListDragOver;
+        _list.DragDrop += async (_, e) => await OnListDragDropAsync(e);
 
         listPanel.Controls.Add(_list);
 
@@ -480,7 +487,9 @@ internal sealed class MainForm : Form
         FillDeviceList(snapshot);
         UpdateSettings(snapshot);
 
-        _statusLabel.Text = $"上次刷新：{DateTime.Now:HH:mm:ss}    每 {TrayAppContext.RefreshIntervalSeconds} 秒自动刷新";
+        _statusLabel.Text =
+            $"上次刷新：{DateTime.Now:HH:mm:ss}    每 {TrayAppContext.RefreshIntervalSeconds} 秒刷新状态" +
+            $"    延迟每 {TrayAppContext.LatencyProbeIntervalSeconds} 秒轮流测 1 台";
     }
 
     private void FillDeviceList(TailscaleSnapshot snapshot)
@@ -513,9 +522,143 @@ internal sealed class MainForm : Form
                 item.SubItems.Add(OsName(peer.Os));
                 item.SubItems.Add(peer.Online ? "在线" : "离线");
                 item.SubItems.Add(peer.ConnectionText);
+                item.SubItems.Add(peer.Online ? peer.LatencyText : "");
                 item.SubItems.Add(peer.TrafficText);
                 item.ForeColor = peer.Online ? Color.FromArgb(31, 41, 55) : Color.Silver;
                 _list.Items.Add(item);
+            }
+        }
+        finally
+        {
+            _list.EndUpdate();
+        }
+    }
+
+    private const int ColConnection = 4;
+    private const int ColLatency = 5;
+
+    private PeerModel PeerAtPoint(int x, int y) =>
+        _list.HitTest(x, y).Item?.Tag as PeerModel;
+
+    private void OnListDragOver(object sender, DragEventArgs e)
+    {
+        var peer = PeerAtPoint(e.X, e.Y);
+        var fileDrop = e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop);
+
+        e.Effect = fileDrop && peer != null && peer.Online
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
+    }
+
+    private async Task OnListDragDropAsync(DragEventArgs e)
+    {
+        var peer = PeerAtPoint(e.X, e.Y);
+        if (peer == null || e.Data == null)
+            return;
+
+        if (!peer.Online)
+        {
+            MessageBox.Show(this, "这台设备当前离线，无法接收文件。", "发送文件",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] dropped || dropped.Length == 0)
+            return;
+
+        var files = ExpandDroppedPaths(dropped);
+        if (files.Count == 0)
+        {
+            MessageBox.Show(this, "拖进来的内容里没有可发送的文件。", "发送文件",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (files.Count > 500)
+        {
+            MessageBox.Show(this,
+                $"一次最多发送 500 个文件，这次是 {files.Count} 个。请分批拖入。",
+                "发送文件", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var preview = string.Join(Environment.NewLine, files.Take(8).Select(System.IO.Path.GetFileName));
+        if (files.Count > 8)
+            preview += $"{Environment.NewLine}…以及另外 {files.Count - 8} 个文件";
+
+        var answer = MessageBox.Show(this,
+            $"用 Taildrop 把这些文件发送到「{peer.DisplayName}」？{Environment.NewLine}{Environment.NewLine}" +
+            $"共 {files.Count} 个文件：{Environment.NewLine}{preview}",
+            "发送文件", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+        if (answer != DialogResult.Yes)
+            return;
+
+        try
+        {
+            await SendFilesToAsync(peer, files);
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("拖放发送失败: " + ex);
+            MessageBox.Show(this, "发送失败：" + ex.Message, "发送文件",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private static List<string> ExpandDroppedPaths(IEnumerable<string> paths)
+    {
+        var files = new List<string>();
+        foreach (var path in paths)
+        {
+            try
+            {
+                if (System.IO.Directory.Exists(path))
+                    files.AddRange(System.IO.Directory.GetFiles(path, "*", System.IO.SearchOption.AllDirectories));
+                else if (System.IO.File.Exists(path))
+                    files.Add(path);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"展开拖放路径失败: {path} => {ex.Message}");
+            }
+        }
+        return files;
+    }
+
+    /// <summary>设备列表的「连接方式」「延迟」两列局部刷新，不重绘整个列表。</summary>
+    public void RefreshLatencyColumn()
+    {
+        if (IsDisposed)
+            return;
+
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action(RefreshLatencyColumn));
+            return;
+        }
+
+        _list.BeginUpdate();
+        try
+        {
+            foreach (ListViewItem item in _list.Items)
+            {
+                if (item.Tag is not PeerModel peer)
+                    continue;
+
+                if (item.SubItems.Count > ColConnection)
+                    item.SubItems[ColConnection].Text = peer.Online ? peer.ConnectionText : "";
+
+                if (item.SubItems.Count <= ColLatency)
+                    continue;
+
+                var sub = item.SubItems[ColLatency];
+                sub.Text = peer.Online ? peer.LatencyText : "";
+                sub.ForeColor = !peer.Online ? Color.Silver
+                    : peer.Latency == null ? Color.Gray
+                    : peer.Latency.TimedOut ? Color.FromArgb(185, 28, 28)
+                    : peer.Latency.Relay ? Color.FromArgb(217, 119, 6)
+                    : Color.FromArgb(16, 163, 127);
             }
         }
         finally
@@ -637,17 +780,29 @@ internal sealed class MainForm : Form
             target = picker.SelectedPeer;
         }
 
+        SelectToolsTab();
+        await SendFilesToAsync(target, dialog.FileNames);
+    }
+
+    /// <summary>把一批文件发到指定设备，结果显示在工具页输出框。</summary>
+    private async Task SendFilesToAsync(PeerModel target, IReadOnlyList<string> files)
+    {
         var device = string.IsNullOrWhiteSpace(target.PrimaryIp) ? target.DisplayName : target.PrimaryIp;
-        _txtTools.Text = $"正在向 {target.DisplayName} 发送 {dialog.FileNames.Length} 个文件…";
+
+        SelectToolsTab();
+        _txtTools.Text = $"正在向 {target.DisplayName} 发送 {files.Count} 个文件…";
 
         var lines = new List<string>();
-        foreach (var file in dialog.FileNames)
+        var succeeded = 0;
+
+        foreach (var file in files)
         {
             var result = await Task.Run(() => _ctx.Client.SendFile(file, device));
             var name = System.IO.Path.GetFileName(file);
 
             if (result.Code == 0)
             {
+                succeeded++;
                 lines.Add($"[成功] {name}");
             }
             else
@@ -658,7 +813,8 @@ internal sealed class MainForm : Form
         }
 
         _txtTools.Text =
-            $"目标设备：{target.DisplayName}（{device}）" + Environment.NewLine + Environment.NewLine +
+            $"目标设备：{target.DisplayName}（{device}）{Environment.NewLine}" +
+            $"成功 {succeeded} / {files.Count}" + Environment.NewLine + Environment.NewLine +
             string.Join(Environment.NewLine + Environment.NewLine, lines);
     }
 
