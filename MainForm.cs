@@ -321,8 +321,17 @@ internal sealed class MainForm : Form
         StyleButton(_btnPeerRefresh, primary: false);
         _btnPeerRefresh.Click += async (_, _) => await _ctx.RefreshAsync(withLatency: true);
 
+        var peerTip = new Label
+        {
+            AutoSize = true,
+            Margin = new Padding(12, 8, 0, 0),
+            ForeColor = Color.Gray,
+            Text = "延迟由 Ping 测得，走 Tailscale 层：能看出是直连还是经过 DERP 中继"
+        };
+
         bar.Controls.Add(_btnPeerDetail);
         bar.Controls.Add(_btnPeerRefresh);
+        bar.Controls.Add(peerTip);
 
         table.Controls.Add(listPanel, 0, 0);
         table.Controls.Add(bar, 0, 1);
