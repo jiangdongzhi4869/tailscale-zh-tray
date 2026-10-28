@@ -230,6 +230,7 @@ internal sealed class MainForm : Form
         _list.Columns.Add("连接方式", 150);
         _list.Columns.Add("延迟", 90);
         _list.DoubleClick += (_, _) => OpenSelectedPeer();
+        _list.MouseUp += OnListMouseUp;
 
         // 拖文件到设备行 = 直接用 Taildrop 发送
         _list.AllowDrop = true;
@@ -592,6 +593,115 @@ internal sealed class MainForm : Form
         }
     }
 
+    /// <summary>窗体或输出框已销毁时，异步回来的结果就不要写回去了。</summary>
+    private bool UiAlive => !IsDisposed && !_txtTools.IsDisposed && _txtTools.IsHandleCreated;
+
+    private readonly ContextMenuStrip _peerMenu = new();
+    private PeerModel _peerMenuTarget;
+    private ToolStripMenuItem _miCopyPeerIp;
+    private ToolStripMenuItem _miSendToPeer;
+    private ToolStripMenuItem _miPeerExitNode;
+
+    private void OnListMouseUp(object sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Right)
+            return;
+
+        var hit = _list.HitTest(e.Location);
+        if (hit.Item?.Tag is not PeerModel peer)
+            return;
+
+        hit.Item.Selected = true;
+        hit.Item.Focused = true;
+        _peerMenuTarget = peer;
+
+        BuildPeerMenuOnce();
+
+        var hasIp = !string.IsNullOrWhiteSpace(peer.PrimaryIp);
+        _miCopyPeerIp.Enabled = hasIp;
+        _miSendToPeer.Enabled = hasIp && peer.Online;
+        _miPeerExitNode.Enabled = peer.ExitNodeOption && hasIp;
+        _miPeerExitNode.Text = peer.ExitNode ? "取消出口节点" : "设为出口节点";
+
+        _peerMenu.Show(_list, e.Location);
+    }
+
+    /// <summary>菜单只建一次，之后靠 Enabled/Text 切换，避免重复创建和释放。</summary>
+    private void BuildPeerMenuOnce()
+    {
+        if (_peerMenu.Items.Count > 0)
+            return;
+
+        _miCopyPeerIp = new ToolStripMenuItem("复制 IP");
+        _miCopyPeerIp.Click += (_, _) => CopyPeerIp();
+
+        _miSendToPeer = new ToolStripMenuItem("发送文件到这台…");
+        _miSendToPeer.Click += async (_, _) => await SendFileToPeerAsync();
+
+        var miDetail = new ToolStripMenuItem("查看详情 / Ping");
+        miDetail.Click += (_, _) => OpenSelectedPeer();
+
+        _miPeerExitNode = new ToolStripMenuItem("设为出口节点");
+        _miPeerExitNode.Click += async (_, _) => await ToggleExitNodeForPeerAsync();
+
+        _peerMenu.Items.Add(_miCopyPeerIp);
+        _peerMenu.Items.Add(_miSendToPeer);
+        _peerMenu.Items.Add(miDetail);
+        _peerMenu.Items.Add(new ToolStripSeparator());
+        _peerMenu.Items.Add(_miPeerExitNode);
+    }
+
+    private void CopyPeerIp()
+    {
+        var ip = _peerMenuTarget?.PrimaryIp;
+        if (string.IsNullOrWhiteSpace(ip))
+            return;
+
+        try
+        {
+            Clipboard.SetText(ip);
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("复制对端 IP 失败: " + ex.Message);
+        }
+    }
+
+    private async Task SendFileToPeerAsync()
+    {
+        var peer = _peerMenuTarget;
+        if (peer == null)
+            return;
+
+        if (!peer.Online)
+        {
+            MessageBox.Show(this, "这台设备当前离线，无法接收文件。", "发送文件",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new OpenFileDialog
+        {
+            Title = $"发送文件到「{peer.DisplayName}」",
+            Multiselect = true,
+            CheckFileExists = true
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        await SendFilesToAsync(peer, dialog.FileNames);
+    }
+
+    private async Task ToggleExitNodeForPeerAsync()
+    {
+        var peer = _peerMenuTarget;
+        if (peer == null)
+            return;
+
+        await _ctx.SetExitNodeAsync(peer.ExitNode ? "" : peer.PrimaryIp);
+    }
+
     private const int ColConnection = 4;
     private const int ColLatency = 5;
 
@@ -848,6 +958,9 @@ internal sealed class MainForm : Form
         var device = string.IsNullOrWhiteSpace(target.PrimaryIp) ? target.DisplayName : target.PrimaryIp;
 
         SelectToolsTab();
+        if (!UiAlive)
+            return;
+
         _txtTools.Text = $"正在向 {target.DisplayName} 发送 {files.Count} 个文件…";
 
         var lines = new List<string>();
@@ -856,6 +969,11 @@ internal sealed class MainForm : Form
         foreach (var file in files)
         {
             var result = await Task.Run(() => _ctx.Client.SendFile(file, device));
+
+            // 传输过程中窗口可能已经被关掉，别再去碰已销毁的控件
+            if (!UiAlive)
+                return;
+
             var name = System.IO.Path.GetFileName(file);
 
             if (result.Code == 0)
@@ -869,6 +987,9 @@ internal sealed class MainForm : Form
                 lines.Add($"[失败] {name}{Environment.NewLine}{detail.Trim()}");
             }
         }
+
+        if (!UiAlive)
+            return;
 
         _txtTools.Text =
             $"目标设备：{target.DisplayName}（{device}）{Environment.NewLine}" +
@@ -891,6 +1012,9 @@ internal sealed class MainForm : Form
         var result = await Task.Run(() => _ctx.Client.ReceiveFiles(dialog.SelectedPath));
 
         var detail = (result.Code == 0 ? result.Out : result.Err) ?? "";
+        if (!UiAlive)
+            return;
+
         _txtTools.Text =
             $"接收目录：{dialog.SelectedPath}" + Environment.NewLine +
             $"退出码：{result.Code}" + Environment.NewLine + Environment.NewLine +
