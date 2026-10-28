@@ -376,8 +376,8 @@ internal sealed class MainForm : Form
         _txtTools.Dock = DockStyle.Fill;
         _txtTools.Multiline = true;
         _txtTools.ReadOnly = true;
-        _txtTools.ScrollBars = ScrollBars.Both;
-        _txtTools.WordWrap = false;
+        _txtTools.ScrollBars = ScrollBars.Vertical;
+        _txtTools.WordWrap = true;
         _txtTools.BackColor = Color.FromArgb(30, 32, 36);
         _txtTools.ForeColor = Color.FromArgb(220, 223, 228);
         _txtTools.Font = new Font("Consolas", 9.5F);
