@@ -229,7 +229,9 @@ internal sealed class MainForm : Form
         _list.Columns.Add("状态", 60);
         _list.Columns.Add("连接方式", 125);
         _list.Columns.Add("延迟", 80);
-        _list.Columns.Add("密钥过期", 175);
+        _list.Columns.Add("密钥过期", 200);
+        LoadColumnWidths();
+        _list.ColumnWidthChanged += OnColumnWidthChanged;
         _list.DoubleClick += (_, _) => OpenSelectedPeer();
         _list.MouseUp += OnListMouseUp;
 
@@ -574,6 +576,59 @@ internal sealed class MainForm : Form
         finally
         {
             _list.EndUpdate();
+        }
+    }
+
+    private static readonly string ColumnWidthPath =
+        System.IO.Path.Combine(Logger.Dir, "columns.txt");
+
+    private DateTime _lastColumnSave = DateTime.MinValue;
+
+    /// <summary>列宽存在本地，下次启动沿用用户拖好的宽度。</summary>
+    private void LoadColumnWidths()
+    {
+        try
+        {
+            if (!System.IO.File.Exists(ColumnWidthPath))
+                return;
+
+            var parts = System.IO.File.ReadAllText(ColumnWidthPath).Split(',');
+            if (parts.Length != _list.Columns.Count)
+                return;
+
+            for (var i = 0; i < parts.Length; i++)
+            {
+                if (int.TryParse(parts[i].Trim(), out var width) && width >= 30)
+                    _list.Columns[i].Width = width;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("读取列宽失败: " + ex.Message);
+        }
+    }
+
+    private void OnColumnWidthChanged(object sender, ColumnWidthChangedEventArgs e)
+    {
+        // 拖动时事件会连续触发，节流一下别每次都写文件
+        if ((DateTime.Now - _lastColumnSave).TotalMilliseconds < 400)
+            return;
+
+        _lastColumnSave = DateTime.Now;
+        SaveColumnWidths();
+    }
+
+    private void SaveColumnWidths()
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(Logger.Dir);
+            var widths = _list.Columns.Cast<ColumnHeader>().Select(c => c.Width);
+            System.IO.File.WriteAllText(ColumnWidthPath, string.Join(",", widths));
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("保存列宽失败: " + ex.Message);
         }
     }
 
@@ -1236,6 +1291,8 @@ internal sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        SaveColumnWidths();
+
         if (e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
