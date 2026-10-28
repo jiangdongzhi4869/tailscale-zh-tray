@@ -170,8 +170,8 @@ internal sealed class TrayAppContext : ApplicationContext
         miToolsPage.Click += (_, _) => ShowToolsPage();
         var miSend = new ToolStripMenuItem("发送文件…");
         miSend.Click += (_, _) => ShowSendFile();
-        var miReceive = new ToolStripMenuItem("接收文件…");
-        miReceive.Click += (_, _) => ShowReceiveFiles();
+        var miReceive = new ToolStripMenuItem("打开下载目录");
+        miReceive.Click += (_, _) => KnownFolders.OpenDownloads();
         var miAccounts = new ToolStripMenuItem("账号…");
         miAccounts.Click += (_, _) => ShowAccounts();
         var miLogout = new ToolStripMenuItem("退出登录…");
@@ -658,12 +658,6 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         ShowMainForm();
         _form?.ShowToolsAndSendFile();
-    }
-
-    public void ShowReceiveFiles()
-    {
-        ShowMainForm();
-        _form?.ShowToolsAndReceiveFiles();
     }
 
     public void ShowAccounts()

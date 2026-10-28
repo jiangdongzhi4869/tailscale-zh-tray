@@ -424,9 +424,6 @@ internal sealed class TailscaleClient
         return Run($"file cp {Quote(path)} {Quote(device + ":")}", timeoutMs);
     }
 
-    public (int Code, string Out, string Err) ReceiveFiles(string directory) =>
-        Run($"file get {Quote(directory)}", 120000);
-
     private static string Quote(string value) =>
         "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
 

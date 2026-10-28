@@ -354,10 +354,10 @@ internal sealed class MainForm : Form
         StyleButton(_btnSendFile, primary: false);
         _btnSendFile.Click += async (_, _) => await StartSendFileAsync();
 
-        _btnReceiveFile.Text = "接收文件…";
-        _btnReceiveFile.Width = 110;
+        _btnReceiveFile.Text = "打开下载目录";
+        _btnReceiveFile.Width = 130;
         StyleButton(_btnReceiveFile, primary: false);
-        _btnReceiveFile.Click += async (_, _) => await StartReceiveFilesAsync();
+        _btnReceiveFile.Click += (_, _) => OpenDownloadsFolder();
 
         _btnAccounts.Text = "账号…";
         _btnAccounts.Width = 90;
@@ -396,7 +396,7 @@ internal sealed class MainForm : Form
             "工具说明：" + Environment.NewLine +
             "· 网络检查：查看 NAT / UDP 可用性和各 DERP 区域延迟。" + Environment.NewLine +
             "· 发送文件：用 Taildrop 把文件发给在线设备。" + Environment.NewLine +
-            "· 接收文件：把 Taildrop 收件箱里的文件移动到指定文件夹。" + Environment.NewLine +
+            "· 打开下载目录：Taildrop 收到的文件由官方客户端自动存到这里。" + Environment.NewLine +
             "· 账号：查看 / 切换已登录账号，或添加新账号。" + Environment.NewLine +
             "· 退出登录：断开并作废当前节点密钥，下次需要重新授权。";
 
@@ -1087,28 +1087,15 @@ internal sealed class MainForm : Form
             string.Join(Environment.NewLine + Environment.NewLine, lines);
     }
 
-    public async Task StartReceiveFilesAsync()
+    /// <summary>接收的文件由官方客户端自动放进下载目录，这里只负责把目录打开。</summary>
+    public void OpenDownloadsFolder()
     {
-        using var dialog = new FolderBrowserDialog
-        {
-            Description = "选择接收文件保存到的文件夹"
-        };
+        KnownFolders.OpenDownloads(this);
 
-        if (dialog.ShowDialog(this) != DialogResult.OK)
-            return;
-
-        _txtTools.Text = "正在接收 Taildrop 文件到：" + Environment.NewLine + dialog.SelectedPath;
-
-        var result = await Task.Run(() => _ctx.Client.ReceiveFiles(dialog.SelectedPath));
-
-        var detail = (result.Code == 0 ? result.Out : result.Err) ?? "";
-        if (!UiAlive)
-            return;
-
-        _txtTools.Text =
-            $"接收目录：{dialog.SelectedPath}" + Environment.NewLine +
-            $"退出码：{result.Code}" + Environment.NewLine + Environment.NewLine +
-            (string.IsNullOrWhiteSpace(detail) ? "（没有输出，可能收件箱为空）" : detail.Trim());
+        if (UiAlive)
+            _txtTools.Text =
+                "Taildrop 收到的文件由官方客户端自动存到：" + Environment.NewLine +
+                KnownFolders.DownloadsPath;
     }
 
     public void ShowAccounts()
@@ -1229,12 +1216,6 @@ internal sealed class MainForm : Form
     {
         _tabs.SelectedIndex = 3;
         _ = StartSendFileAsync();
-    }
-
-    public void ShowToolsAndReceiveFiles()
-    {
-        _tabs.SelectedIndex = 3;
-        _ = StartReceiveFilesAsync();
     }
 
     public void ShowToolsAndAccounts()
