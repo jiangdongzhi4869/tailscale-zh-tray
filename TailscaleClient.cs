@@ -388,8 +388,20 @@ internal sealed class TailscaleClient
 
     public void LoginNewAccount() => StartDetached("login");
 
-    public (int Code, string Out, string Err) SendFile(string path, string device) =>
-        Run($"file cp {Quote(path)} {Quote(device + ":")}", 120000);
+    /// <summary>
+    /// 发送超时按文件大小算：固定 120 秒会让稍大的文件在走 DERP 中继时被强杀。
+    /// 实测中继只有几十 KB/s，所以留足余量（每 MB 给 30 秒，另加 60 秒余量，上限 1 小时）。
+    /// </summary>
+    public (int Code, string Out, string Err) SendFile(string path, string device)
+    {
+        long size = 0;
+        try { size = new FileInfo(path).Length; } catch { }
+
+        var sizeMb = size / (1024.0 * 1024.0);
+        var timeoutMs = 60_000 + (int)Math.Min(sizeMb * 30_000, 3_600_000);
+
+        return Run($"file cp {Quote(path)} {Quote(device + ":")}", timeoutMs);
+    }
 
     public (int Code, string Out, string Err) ReceiveFiles(string directory) =>
         Run($"file get {Quote(directory)}", 120000);

@@ -6,6 +6,7 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -40,7 +41,13 @@ internal sealed class TrayAppContext : ApplicationContext
     private TailscaleSnapshot _snap;
     private bool _busy;
     private bool _probing;
+    private bool _refreshPending;
+    private bool _pendingWithLatency;
     private bool _updatingMenu;
+    private CancellationTokenSource _scanCts;
+    private readonly Control _marshaller = new();
+    private EventWaitHandle _showSignal;
+    private Thread _showWaiter;
 
     public Icon AppIcon => GetIcon("normal");
 
@@ -55,11 +62,60 @@ internal sealed class TrayAppContext : ApplicationContext
         _tray.Visible = true;
         _tray.DoubleClick += (_, _) => ShowMainForm();
 
+        StartShowSignalListener();
+
         // 启动时读一次状态（托盘图标和提示要有个初始值），之后不再自动刷新
         _ = RefreshAsync();
 
         if (showWindowOnStart)
             ShowMainForm();
+    }
+
+    /// <summary>
+    /// 第二个实例启动时会 Set 这个具名事件，我们把已存在的窗口叫到前台，
+    /// 而不是弹一句「已经在运行了」然后什么也不做。
+    /// </summary>
+    private void StartShowSignalListener()
+    {
+        try
+        {
+            _ = _marshaller.Handle;   // 提前建句柄，后台线程才能 BeginInvoke
+            _showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, Program.ShowSignalName);
+
+            _showWaiter = new Thread(() =>
+            {
+                while (true)
+                {
+                    try
+                    {
+                        if (!_showSignal.WaitOne())
+                            return;
+                    }
+                    catch
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        _marshaller.BeginInvoke(new Action(ShowMainForm));
+                    }
+                    catch
+                    {
+                        return;
+                    }
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "TailscaleZHTray-ShowSignal"
+            };
+            _showWaiter.Start();
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("单实例信号初始化失败: " + ex.Message);
+        }
     }
 
     private void BuildMenu()
@@ -152,7 +208,14 @@ internal sealed class TrayAppContext : ApplicationContext
     public async Task RefreshAsync(bool withLatency = false)
     {
         if (_busy)
+        {
+            // 忙的时候（正在测延迟）不能直接丢掉这次请求，
+            // 否则「断开连接」之后界面会停在旧状态
+            _refreshPending = true;
+            _pendingWithLatency |= withLatency;
+            _form?.SetStatus("正在刷新中，已排队再刷一次…");
             return;
+        }
 
         _busy = true;
         try
@@ -181,6 +244,14 @@ internal sealed class TrayAppContext : ApplicationContext
         finally
         {
             _busy = false;
+
+            if (_refreshPending)
+            {
+                var again = _pendingWithLatency;
+                _refreshPending = false;
+                _pendingWithLatency = false;
+                _ = RefreshAsync(again);
+            }
         }
     }
 
@@ -227,11 +298,18 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
+        var cts = new CancellationTokenSource();
+        _scanCts = cts;
+        var token = cts.Token;
+
         _probing = true;
         try
         {
             for (var i = 0; i < online.Count; i++)
             {
+                if (token.IsCancellationRequested)
+                    break;
+
                 var peer = online[i];
                 var ip = LatencyKey(peer);
 
@@ -239,6 +317,9 @@ internal sealed class TrayAppContext : ApplicationContext
 
                 // 发 3 个包：第一个常常还是 DERP 中继，最后一个多半已打洞成直连
                 var result = await Task.Run(() => _client.Ping(ip, 3, 12000));
+                if (token.IsCancellationRequested)
+                    break;
+
                 var sample = PingOutputParser.Parse(result.Out);
 
                 var key = LatencyKey(peer);
@@ -256,7 +337,14 @@ internal sealed class TrayAppContext : ApplicationContext
                 {
                     _form?.SetStatus(
                         $"延迟已测 {i + 1}/{online.Count}，{LatencyStepDelayMs / 1000} 秒后测下一台…");
-                    await Task.Delay(LatencyStepDelayMs);
+                    try
+                    {
+                        await Task.Delay(LatencyStepDelayMs, token);
+                    }
+                    catch (TaskCanceledException)
+                    {
+                        break;
+                    }
                 }
             }
         }
@@ -267,7 +355,13 @@ internal sealed class TrayAppContext : ApplicationContext
         finally
         {
             _probing = false;
-            _form?.ShowRefreshStatus();
+            if (ReferenceEquals(_scanCts, cts))
+                _scanCts = null;
+            cts.Dispose();
+
+            // 退出中就不要再去碰已经销毁的窗体了
+            if (!token.IsCancellationRequested)
+                _form?.ShowRefreshStatus();
         }
     }
 
@@ -572,6 +666,8 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void Quit()
     {
+        // 强行退出：先掐掉正在跑的延迟扫描（含中间的 5 秒等待），不等它自己结束
+        try { _scanCts?.Cancel(); } catch { }
 
         try { _tray.Visible = false; _tray.Dispose(); } catch { }
 
@@ -582,6 +678,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _icons.Clear();
 
         try { _exitMenu?.Dispose(); } catch { }
+        try { _showSignal?.Dispose(); } catch { }
 
         ExitThread();
     }

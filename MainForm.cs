@@ -526,6 +526,12 @@ internal sealed class MainForm : Form
         _list.BeginUpdate();
         try
         {
+            // 刷新后把选中行和滚动位置还原，否则看一眼详情再刷新就丢了
+            var selectedIp = (_list.SelectedItems.Count > 0
+                ? (_list.SelectedItems[0].Tag as PeerModel)?.PrimaryIp
+                : null);
+            var topIndex = _list.Items.Count > 0 ? _list.TopItem?.Index ?? -1 : -1;
+
             _list.Items.Clear();
 
             if (snapshot.Peers.Count == 0)
@@ -555,10 +561,34 @@ internal sealed class MainForm : Form
                 item.ForeColor = peer.Online ? Color.FromArgb(31, 41, 55) : Color.Silver;
                 _list.Items.Add(item);
             }
+
+            RestoreSelection(selectedIp, topIndex);
         }
         finally
         {
             _list.EndUpdate();
+        }
+    }
+
+    private void RestoreSelection(string selectedIp, int topIndex)
+    {
+        if (!string.IsNullOrEmpty(selectedIp))
+        {
+            foreach (ListViewItem item in _list.Items)
+            {
+                if (item.Tag is PeerModel peer && peer.PrimaryIp == selectedIp)
+                {
+                    item.Selected = true;
+                    item.Focused = true;
+                    break;
+                }
+            }
+        }
+
+        if (topIndex > 0 && topIndex < _list.Items.Count)
+        {
+            try { _list.TopItem = _list.Items[topIndex]; }
+            catch { }
         }
     }
 

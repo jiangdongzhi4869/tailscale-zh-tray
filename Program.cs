@@ -9,6 +9,9 @@ namespace TailscaleZHTray;
 
 internal static class Program
 {
+    /// <summary>第二个实例用它唤醒第一个实例的主窗口。</summary>
+    public const string ShowSignalName = "TailscaleZHTray_Show_v1";
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -21,6 +24,21 @@ internal static class Program
         using var mutex = new Mutex(true, "TailscaleZHTray_SingleInstance_v1", out var createdNew);
         if (!createdNew)
         {
+            // 已经有实例在跑：通知它把窗口叫到前台，自己安静退出
+            try
+            {
+                if (EventWaitHandle.TryOpenExisting(ShowSignalName, out var signal))
+                {
+                    using (signal)
+                        signal.Set();
+                    return;
+                }
+            }
+            catch
+            {
+                // 事件没建起来，退回弹框提示
+            }
+
             MessageBox.Show(
                 "Tailscale 中文托盘已经在运行了，请检查系统托盘区。",
                 "Tailscale 中文托盘",
