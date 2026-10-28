@@ -30,7 +30,7 @@ internal sealed class PeerDetailForm : Form
         var info = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Height = 232,
+            Height = 206,
             ColumnCount = 2,
             Padding = new Padding(18, 14, 18, 10),
             BackColor = Color.White,
@@ -48,10 +48,6 @@ internal sealed class PeerDetailForm : Form
         AddRow(info, "延迟", peer.Latency == null
             ? "尚未测量"
             : $"{peer.LatencyText}（{peer.Latency.At:HH:mm:ss} 测得，最近一次）");
-        AddRow(info, "收发流量", peer.TrafficText);
-        AddRow(info, "最后握手", peer.LastHandshake == default
-            ? "—"
-            : peer.LastHandshake.ToString("yyyy-MM-dd HH:mm:ss"));
         AddRow(info, "出口节点", peer.ExitNodeOption
             ? (peer.ExitNode ? "当前正在使用" : "可作为出口节点")
             : "否");
@@ -109,7 +105,7 @@ internal sealed class PeerDetailForm : Form
             RowCount = 3,
             BackColor = Color.FromArgb(247, 248, 250)
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 232));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 206));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 

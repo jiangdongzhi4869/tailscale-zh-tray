@@ -223,13 +223,12 @@ internal sealed class MainForm : Form
         _list.MultiSelect = false;
         _list.BorderStyle = BorderStyle.FixedSingle;
         _list.BackColor = Color.White;
-        _list.Columns.Add("设备", 210);
-        _list.Columns.Add("地址", 145);
-        _list.Columns.Add("系统", 85);
-        _list.Columns.Add("状态", 60);
-        _list.Columns.Add("连接方式", 120);
-        _list.Columns.Add("延迟", 75);
-        _list.Columns.Add("收发流量", 160);
+        _list.Columns.Add("设备", 260);
+        _list.Columns.Add("地址", 165);
+        _list.Columns.Add("系统", 95);
+        _list.Columns.Add("状态", 70);
+        _list.Columns.Add("连接方式", 150);
+        _list.Columns.Add("延迟", 90);
         _list.DoubleClick += (_, _) => OpenSelectedPeer();
 
         // 拖文件到设备行 = 直接用 Taildrop 发送
@@ -553,7 +552,6 @@ internal sealed class MainForm : Form
                 item.SubItems.Add(peer.Online ? "在线" : "离线");
                 item.SubItems.Add(peer.ConnectionText);
                 item.SubItems.Add(peer.Online ? peer.LatencyText : "");
-                item.SubItems.Add(peer.TrafficText);
                 item.ForeColor = peer.Online ? Color.FromArgb(31, 41, 55) : Color.Silver;
                 _list.Items.Add(item);
             }
