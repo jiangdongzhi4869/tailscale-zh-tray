@@ -15,6 +15,8 @@ internal sealed class PeerDetailForm : Form
     private readonly Button _btnPing = new();
     private readonly TextBox _output = new();
     private readonly Label _dropZone = new();
+    private Label _valConnection;
+    private Label _valLatency;
 
     public PeerDetailForm(TailscaleClient client, PeerModel peer)
     {
@@ -47,10 +49,8 @@ internal sealed class PeerDetailForm : Form
         AddRow(info, "IP 地址", Safe(string.Join("  /  ", peer.Ips)));
         AddRow(info, "系统", Safe(peer.Os));
         AddRow(info, "状态", peer.Online ? "在线" : "离线");
-        AddRow(info, "连接方式", peer.ConnectionText);
-        AddRow(info, "延迟", peer.Latency == null
-            ? "尚未测量"
-            : $"{peer.LatencyText}（{peer.Latency.At:HH:mm:ss} 测得，最近一次）");
+        _valConnection = AddRow(info, "连接方式", peer.ConnectionText);
+        _valLatency = AddRow(info, "延迟", LatencyText());
         AddRow(info, "出口节点", peer.ExitNodeOption
             ? (peer.ExitNode ? "当前正在使用" : "可作为出口节点")
             : "否");
@@ -138,7 +138,7 @@ internal sealed class PeerDetailForm : Form
     private static string Safe(string value) =>
         string.IsNullOrWhiteSpace(value) ? "—" : value;
 
-    private static void AddRow(TableLayoutPanel table, string name, string value)
+    private static Label AddRow(TableLayoutPanel table, string name, string value)
     {
         var label = new Label
         {
@@ -162,6 +162,19 @@ internal sealed class PeerDetailForm : Form
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
         table.Controls.Add(label);
         table.Controls.Add(content);
+        return content;
+    }
+
+    private string LatencyText() =>
+        _peer.Latency == null
+            ? "尚未测量"
+            : $"{_peer.LatencyText}（{_peer.Latency.At:HH:mm:ss} 测得，最近一次）";
+
+    /// <summary>Ping 完成后把上面两行刷新掉，别让信息区还挂着旧值。</summary>
+    private void UpdateInfoRows()
+    {
+        _valLatency.Text = LatencyText();
+        _valConnection.Text = _peer.ConnectionText;
     }
 
     private async Task RunPingAsync()
@@ -188,7 +201,10 @@ internal sealed class PeerDetailForm : Form
 
         // 顺手把这次结果记为最新的延迟数据，设备列表那边也会跟着更新
         if (result.Code == 0 && !string.IsNullOrWhiteSpace(text))
+        {
             _peer.Latency = PingOutputParser.Parse(text);
+            UpdateInfoRows();
+        }
 
         _btnPing.Enabled = true;
     }
