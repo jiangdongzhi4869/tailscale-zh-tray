@@ -20,7 +20,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private const string AdminConsoleUrl = "https://login.tailscale.com/admin/machines";
 
     // 点「刷新」后逐台测延迟，每测完一台隔 5 秒再测下一台
-    public const int LatencyStepDelayMs = 5000;
+    public const int LatencyStepDelayMs = 3000;
 
     // 不做后台轮询：状态和延迟只在用户操作时刷新（点「刷新」、连接/断开、改设置之后）
     private readonly TailscaleClient _client = new();
@@ -332,7 +332,7 @@ internal sealed class TrayAppContext : ApplicationContext
                 AttachLatency(_snap);
                 _form?.RefreshLatencyColumn();
 
-                // 测完一台歇 5 秒再测下一台，避免连续 ping 抢带宽
+                // 测完一台歇 3 秒再测下一台，避免连续 ping 抢带宽
                 if (i < online.Count - 1)
                 {
                     _form?.SetStatus(
