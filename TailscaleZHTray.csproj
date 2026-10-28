@@ -13,11 +13,17 @@
     <PlatformTarget>x64</PlatformTarget>
     <DebugType>none</DebugType>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
-    <Version>1.4.8</Version>
-    <FileVersion>1.4.8.0</FileVersion>
+    <Version>1.4.9</Version>
+    <FileVersion>1.4.9.0</FileVersion>
     <Product>Tailscale 中文托盘</Product>
     <AssemblyTitle>Tailscale 中文托盘</AssemblyTitle>
     <Company>本地自制</Company>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="assets\mascot.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 
 </Project>

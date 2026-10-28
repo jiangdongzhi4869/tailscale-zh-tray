@@ -28,6 +28,7 @@ internal sealed class MainForm : Form
     private readonly Button _btnExitNode = new();
     private readonly Button _btnAdmin = new();
     private readonly Label _lblSummary = new();
+    private readonly PictureBox _picMascot = new();
 
     private readonly ListView _list = new();
     private readonly Button _btnPeerDetail = new();
@@ -198,7 +199,54 @@ internal sealed class MainForm : Form
         table.Controls.Add(bar, 0, 0);
         table.Controls.Add(_lblSummary, 0, 1);
         page.Controls.Add(table);
+
+        // 状态页底部左下角的吉祥物；assets\mascot.png 缺失时整块不显示
+        _picMascot.Image = LoadMascot();
+        if (_picMascot.Image != null)
+        {
+            _picMascot.SizeMode = PictureBoxSizeMode.Zoom;
+            _picMascot.BackColor = Color.Transparent;
+            _picMascot.Size = new Size(190, 200);
+            page.Controls.Add(_picMascot);
+            _picMascot.BringToFront();
+            page.Resize += (_, _) => LayoutMascot(page);
+            LayoutMascot(page);
+        }
+
         return page;
+    }
+
+    /// <summary>吉祥物贴左下角，窗口变矮时跟着往上收，别被裁掉。</summary>
+    private void LayoutMascot(TabPage page)
+    {
+        if (_picMascot.Image == null)
+            return;
+
+        _picMascot.Left = 22;
+        _picMascot.Top = Math.Max(0, page.ClientSize.Height - _picMascot.Height - 8);
+    }
+
+    /// <summary>从 exe 旁边的 assets\mascot.png 读图；换图不用重新编译。</summary>
+    private static Image LoadMascot()
+    {
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "assets", "mascot.png");
+            if (!File.Exists(path))
+                return null;
+
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var ms = new MemoryStream();
+            fs.CopyTo(ms);
+            ms.Position = 0;
+            using var tmp = Image.FromStream(ms);
+            return new Bitmap(tmp);
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("加载吉祥物失败：" + ex.Message);
+            return null;
+        }
     }
 
     private TabPage BuildDevicesTab()
