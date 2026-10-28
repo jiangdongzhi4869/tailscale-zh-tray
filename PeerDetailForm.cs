@@ -17,6 +17,7 @@ internal sealed class PeerDetailForm : Form
     private readonly Label _dropZone = new();
     private Label _valConnection;
     private Label _valLatency;
+    private Label _valStatus;
 
     public PeerDetailForm(TailscaleClient client, PeerModel peer)
     {
@@ -48,7 +49,7 @@ internal sealed class PeerDetailForm : Form
         AddRow(info, "DNS 名称", Safe(peer.DnsName));
         AddRow(info, "IP 地址", Safe(string.Join("  /  ", peer.Ips)));
         AddRow(info, "系统", Safe(peer.Os));
-        AddRow(info, "状态", peer.Online ? "在线" : "离线");
+        _valStatus = AddRow(info, "状态", peer.Online ? "在线" : "离线");
         _valConnection = AddRow(info, "连接方式", peer.ConnectionText);
         _valLatency = AddRow(info, "延迟", LatencyText());
         AddRow(info, "出口节点", peer.ExitNodeOption
@@ -163,6 +164,66 @@ internal sealed class PeerDetailForm : Form
         table.Controls.Add(label);
         table.Controls.Add(content);
         return content;
+    }
+
+    /// <summary>窗口一打开就重新取一次状态，别拿列表里那份旧快照糊弄人。</summary>
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        _ = RefreshInfoAsync();
+    }
+
+    private async Task RefreshInfoAsync()
+    {
+        try
+        {
+            var snapshot = await Task.Run(() => _client.Fetch());
+            if (IsDisposed || snapshot == null)
+                return;
+
+            var fresh = snapshot.Peers.FirstOrDefault(SamePeer);
+            if (fresh == null)
+                return;
+
+            // 延迟是本地 Ping 测的，status 里没有，留着不动
+            var latency = _peer.Latency;
+
+            _peer.HostName = fresh.HostName;
+            _peer.DnsName = fresh.DnsName;
+            _peer.Os = fresh.Os;
+            _peer.Ips = fresh.Ips;
+            _peer.Online = fresh.Online;
+            _peer.ExitNode = fresh.ExitNode;
+            _peer.ExitNodeOption = fresh.ExitNodeOption;
+            _peer.Relay = fresh.Relay;
+            _peer.CurAddr = fresh.CurAddr;
+            _peer.KeyExpiry = fresh.KeyExpiry;
+            _peer.Latency = latency;
+
+            if (IsDisposed)
+                return;
+
+            _valStatus.Text = _peer.Online ? "在线" : "离线";
+            UpdateInfoRows();
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("详情页刷新状态失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>按 DNS 名 / 设备名 / 主 IP 认人，任意一项对上就算同一个节点。</summary>
+    private bool SamePeer(PeerModel other)
+    {
+        if (!string.IsNullOrWhiteSpace(_peer.DnsName) &&
+            string.Equals(other.DnsName, _peer.DnsName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.IsNullOrWhiteSpace(_peer.HostName) &&
+            string.Equals(other.HostName, _peer.HostName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return !string.IsNullOrWhiteSpace(_peer.PrimaryIp) && other.Ips.Contains(_peer.PrimaryIp);
     }
 
     private string LatencyText() =>
