@@ -34,6 +34,9 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem _miToggle = new("连接");
     private readonly ToolStripMenuItem _miExitNodes = new("出口节点");
     private readonly ToolStripMenuItem _miCopyIp = new("复制本机 IP");
+    private readonly ToolStripMenuItem _miCopySelfV4 = new("IPv4（100.x）");
+    private readonly ToolStripMenuItem _miCopySelfV6 = new("IPv6（fd7a:…）");
+    private readonly ToolStripMenuItem _miCopySelfAll = new("全部 IP（每行一个）");
     private readonly ToolStripMenuItem _miReset = new("恢复默认设置…");
 
     private MainForm _form;
@@ -140,7 +143,12 @@ internal sealed class TrayAppContext : ApplicationContext
         _miExitNodes.DropDownOpening += (_, _) => FillExitNodeMenu(_miExitNodes.DropDownItems);
         _menu.Items.Add(_miExitNodes);
 
-        _miCopyIp.Click += (_, _) => CopyIp();
+        _miCopySelfV4.Click += (_, _) => CopySelfIp(false);
+        _miCopySelfV6.Click += (_, _) => CopySelfIp(true);
+        _miCopySelfAll.Click += (_, _) => CopySelfIp(null);
+        _miCopyIp.DropDownItems.Add(_miCopySelfV4);
+        _miCopyIp.DropDownItems.Add(_miCopySelfV6);
+        _miCopyIp.DropDownItems.Add(_miCopySelfAll);
         _menu.Items.Add(_miCopyIp);
 
         _menu.Items.Add(new ToolStripSeparator());
@@ -387,7 +395,12 @@ internal sealed class TrayAppContext : ApplicationContext
             ? "断开连接"
             : NeedsLogin(snapshot) ? "登录并连接" : "连接";
         _miToggle.Enabled = true;
+        var selfV4 = SelfIps(false);
+        var selfV6 = SelfIps(true);
         _miCopyIp.Enabled = snapshot.SelfIps.Count > 0;
+        _miCopySelfV4.Enabled = selfV4.Count > 0;
+        _miCopySelfV6.Enabled = selfV6.Count > 0;
+        _miCopySelfAll.Enabled = snapshot.SelfIps.Count > 0;
 
         _updatingMenu = true;
         foreach (var spec in SettingsCatalog.All)
@@ -588,19 +601,31 @@ internal sealed class TrayAppContext : ApplicationContext
         _exitMenu.Show(anchor, new Point(0, anchor.Height + 4));
     }
 
-    public void CopyIp()
+    private List<string> SelfIps(bool? wantV6)
     {
-        var ip = _snap?.SelfIps.FirstOrDefault();
-        if (string.IsNullOrEmpty(ip))
+        var ips = _snap?.SelfIps ?? new List<string>();
+        if (wantV6 == null)
+            return ips.Where(ip => !string.IsNullOrWhiteSpace(ip)).ToList();
+
+        return ips.Where(ip => !string.IsNullOrWhiteSpace(ip))
+                  .Where(ip => ip.Contains(':') == wantV6.Value)
+                  .ToList();
+    }
+
+    /// <param name="wantV6">null = 全部地址，每行一个</param>
+    public void CopySelfIp(bool? wantV6)
+    {
+        var text = string.Join(Environment.NewLine, SelfIps(wantV6));
+        if (string.IsNullOrWhiteSpace(text))
         {
-            MessageBox.Show("当前还没有分配 Tailscale IP（可能尚未登录）。",
+            MessageBox.Show("当前还没有分配这一类 Tailscale IP（可能尚未登录）。",
                 "Tailscale 中文托盘", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
         try
         {
-            Clipboard.SetText(ip);
+            Clipboard.SetText(text);
         }
         catch (Exception ex)
         {

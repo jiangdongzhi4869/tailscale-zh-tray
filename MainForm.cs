@@ -599,6 +599,10 @@ internal sealed class MainForm : Form
     private readonly ContextMenuStrip _peerMenu = new();
     private PeerModel _peerMenuTarget;
     private ToolStripMenuItem _miCopyPeerIp;
+    private ToolStripMenuItem _miCopyV4;
+    private ToolStripMenuItem _miCopyV6;
+    private ToolStripMenuItem _miCopyAllIp;
+    private ToolStripMenuItem _miCopyName;
     private ToolStripMenuItem _miSendToPeer;
     private ToolStripMenuItem _miPeerExitNode;
 
@@ -618,7 +622,16 @@ internal sealed class MainForm : Form
         BuildPeerMenuOnce();
 
         var hasIp = !string.IsNullOrWhiteSpace(peer.PrimaryIp);
-        _miCopyPeerIp.Enabled = hasIp;
+        var v4 = PeerIps(peer, wantV6: false);
+        var v6 = PeerIps(peer, wantV6: true);
+
+        _miCopyPeerIp.Enabled = hasIp || v4.Count > 0 || v6.Count > 0;
+        _miCopyV4.Enabled = v4.Count > 0;
+        _miCopyV6.Enabled = v6.Count > 0;
+        _miCopyAllIp.Enabled = v4.Count + v6.Count > 0;
+        _miCopyName.Enabled = !string.IsNullOrWhiteSpace(peer.DisplayName) ||
+                              !string.IsNullOrWhiteSpace(peer.DnsName);
+
         _miSendToPeer.Enabled = hasIp && peer.Online;
         _miPeerExitNode.Enabled = peer.ExitNodeOption && hasIp;
         _miPeerExitNode.Text = peer.ExitNode ? "取消出口节点" : "设为出口节点";
@@ -633,7 +646,31 @@ internal sealed class MainForm : Form
             return;
 
         _miCopyPeerIp = new ToolStripMenuItem("复制 IP");
-        _miCopyPeerIp.Click += (_, _) => CopyPeerIp();
+
+        _miCopyV4 = new ToolStripMenuItem("IPv4（100.x）");
+        _miCopyV4.Click += (_, _) => CopyPeerText(string.Join(Environment.NewLine, PeerIps(_peerMenuTarget, false)));
+
+        _miCopyV6 = new ToolStripMenuItem("IPv6（fd7a:…）");
+        _miCopyV6.Click += (_, _) => CopyPeerText(string.Join(Environment.NewLine, PeerIps(_peerMenuTarget, true)));
+
+        _miCopyAllIp = new ToolStripMenuItem("全部 IP（每行一个）");
+        _miCopyAllIp.Click += (_, _) => CopyPeerText(string.Join(Environment.NewLine,
+            PeerIps(_peerMenuTarget, false).Concat(PeerIps(_peerMenuTarget, true))));
+
+        _miCopyName = new ToolStripMenuItem("设备名（DNS 名称）");
+        _miCopyName.Click += (_, _) =>
+        {
+            var peer = _peerMenuTarget;
+            if (peer == null)
+                return;
+            CopyPeerText(string.IsNullOrWhiteSpace(peer.DnsName) ? peer.DisplayName : peer.DnsName);
+        };
+
+        _miCopyPeerIp.DropDownItems.Add(_miCopyV4);
+        _miCopyPeerIp.DropDownItems.Add(_miCopyV6);
+        _miCopyPeerIp.DropDownItems.Add(_miCopyAllIp);
+        _miCopyPeerIp.DropDownItems.Add(new ToolStripSeparator());
+        _miCopyPeerIp.DropDownItems.Add(_miCopyName);
 
         _miSendToPeer = new ToolStripMenuItem("发送文件到这台…");
         _miSendToPeer.Click += async (_, _) => await SendFileToPeerAsync();
@@ -651,19 +688,30 @@ internal sealed class MainForm : Form
         _peerMenu.Items.Add(_miPeerExitNode);
     }
 
-    private void CopyPeerIp()
+    /// <summary>按协议族筛出对端地址，IPv4 判断看有没有冒号。</summary>
+    private static List<string> PeerIps(PeerModel peer, bool wantV6)
     {
-        var ip = _peerMenuTarget?.PrimaryIp;
-        if (string.IsNullOrWhiteSpace(ip))
+        if (peer?.Ips == null)
+            return new List<string>();
+
+        return peer.Ips
+            .Where(ip => !string.IsNullOrWhiteSpace(ip))
+            .Where(ip => ip.Contains(':') == wantV6)
+            .ToList();
+    }
+
+    private static void CopyPeerText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
             return;
 
         try
         {
-            Clipboard.SetText(ip);
+            Clipboard.SetText(text);
         }
         catch (Exception ex)
         {
-            Logger.Log("复制对端 IP 失败: " + ex.Message);
+            Logger.Log("复制对端信息失败: " + ex.Message);
         }
     }
 
