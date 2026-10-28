@@ -227,7 +227,7 @@ internal sealed class MainForm : Form
         _list.Columns.Add("地址", 140);
         _list.Columns.Add("系统", 80);
         _list.Columns.Add("状态", 60);
-        _list.Columns.Add("连接方式", 125);
+        _list.Columns.Add("连接方式", 100);
         _list.Columns.Add("延迟", 80);
         _list.Columns.Add("密钥过期", 200);
         LoadColumnWidths();
