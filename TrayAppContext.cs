@@ -19,7 +19,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private const string AdminConsoleUrl = "https://login.tailscale.com/admin/machines";
 
-    // 点「刷新」后逐台测延迟，每测完一台隔 5 秒再测下一台
+    // 点「刷新」后逐台测延迟，每测完一台隔 3 秒再测下一台
     public const int LatencyStepDelayMs = 3000;
 
     // 不做后台轮询：状态和延迟只在用户操作时刷新（点「刷新」、连接/断开、改设置之后）

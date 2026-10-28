@@ -27,12 +27,25 @@ Tailscale 的 Windows 桌面客户端（`tailscale-ipn.exe`）是闭源的：
 
 | 页面 | 内容 |
 |---|---|
-| 状态 | 连接 / 断开、刷新、出口节点、管理后台、健康提示 |
-| 设备 | 设备列表（IP / 系统 / 在线 / 直连或 DERP / 收发流量）、详情、Ping |
-| 设置 | 7 个开关：允许传入连接、Tailscale DNS、子网路由、自动更新、无人值守、出口节点本地网络、作为出口节点；恢复默认设置 |
-| 工具 | 网络检查、Taildrop 发送 / 接收、账号切换、退出登录、打开日志目录 |
+| 状态 | 连接 / 断开、刷新、出口节点、管理后台、健康提示；右下角吉祥物（可换图） |
+| 设备 | 设备列表（设备名 / 地址 / 系统 / 在线 / 连接方式 / 延迟 / 密钥过期）、右键菜单、拖放发送文件、列宽记忆 |
+| 设置 | 7 个开关：允许传入连接、Tailscale DNS、子网路由、自动更新（官方客户端）、无人值守、出口节点本地网络、作为出口节点；恢复默认设置 |
+| 工具 | 网络检查、发送文件、打开下载目录、账号切换、退出登录、打开日志目录 |
 
-托盘菜单提供同样的功能，图标颜色表示连接状态。所有设置值实时读自 `tailscale get --json`，不做本地缓存。
+**不做后台轮询。** 只有点「刷新」或托盘菜单里的刷新才会读状态；延迟也是点刷新后才测，并逐台进行、每台之间隔 3 秒，随时可以从托盘退出强制中断。所有设置值实时读自 `tailscale get --json`，不做本地缓存。
+
+### 设备页细节
+
+- **连接方式**：显示「直连」或「中继 xxx」；如果刚 Ping 过，优先用 Ping 结果里的路径，没 Ping 过才看 `status --json` 的 `CurAddr` / `Relay`。
+- **延迟**：`tailscale ping -c 3` 取最后一次 pong 的往返时间；超时显示「超时」。
+- **密钥过期**：显示到期日期和剩余天数，30 天内会标红；永不过期的密钥显示「永不过期」。
+- **右键菜单**：复制 IPv4 / 复制 IPv6 / 复制全部 IP / 复制设备名 / 发送文件到这台 / 查看详情 / Ping / 设为出口节点。
+- **拖放发送**：把文件（或文件夹，会递归展开）拖到设备行上直接发送；设备详情窗口里也有一块拖放区。
+- 列宽改完会记住，下次启动保持（存在 `%LOCALAPPDATA%\TailscaleZHTray\columns.txt`）。
+
+### 吉祥物
+
+状态页右下角会显示 `assets\mascot.png`。**图片是运行时从 exe 旁边读的**，想换形象直接替换这个文件重启即可，不用重新编译。文件不存在或读不出来就整块不显示，不影响其他功能。
 
 ## 系统要求
 
@@ -53,7 +66,7 @@ dotnet publish -c Release -r win-x64 --self-contained true \
   -p:IncludeNativeLibrariesForSelfExtract=true -o dist_portable
 ```
 
-产物在 `dist/` 或 `dist_portable/`（已在 `.gitignore` 中排除）。
+产物在 `dist/` 或 `dist_portable/`（已在 `.gitignore` 中排除）。吉祥物图片会作为 `assets\mascot.png` 一起输出到产物目录，不要把 `assets` 文件夹删掉。
 
 Windows 下把 `\` 换成 `^` 续行即可。
 
@@ -70,19 +83,24 @@ TailscaleZHTray.exe --selftest
 
 | 文件 | 作用 |
 |---|---|
-| `TailscaleClient.cs` | 全部 CLI 调用与 JSON 解析 |
+| `TailscaleClient.cs` | 全部 CLI 调用与 JSON 解析（含 ping 输出解析、Taildrop 发送） |
 | `SettingsCatalog.cs` | 设置开关定义表（加开关只改这一处） |
 | `MainForm.cs` | 主窗口 4 个页签 |
-| `TrayAppContext.cs` | 托盘图标与右键菜单 |
-| `PeerDetailForm.cs` / `AccountForm.cs` / `PickPeerForm.cs` | 子窗口 |
+| `TrayAppContext.cs` | 托盘图标与右键菜单、逐台测延迟的调度 |
+| `PeerDetailForm.cs` / `AccountForm.cs` / `PickPeerForm.cs` | 子窗口（详情窗口带拖放发送区） |
+| `FileDropHelper.cs` | 拖放路径展开与预览文本 |
+| `KnownFolders.cs` | 取系统「下载」文件夹路径并用资源管理器打开 |
 | `Program.cs` | 单实例、自检、异常兜底 |
 | `Logger.cs` | 日志 |
+| `assets/mascot.png` | 状态页吉祥物（可替换） |
 
 ## 已知限制
 
-- 设备详情 / Ping 需要至少一台对端设备
-- 控制类命令（连接、断开、改设置）需要管理员权限
-- 只在作者自己的机器上验证过；Windows 10 未实测
+- **Taildrop**：只能发给**在线**设备，离线会直接报错（Taildrop 本身不排队）；不能发给自己；收到的文件由官方客户端自动存进系统「下载」文件夹，本程序只负责把这个目录打开。
+- **延迟**不会自动测，需要点「刷新」；逐台测是为了不把 `tailscale ping` 一次性铺满。
+- 设备详情 / Ping 需要至少一台对端设备。
+- 控制类命令（连接、断开、改设置）需要管理员权限。
+- 只在作者自己的机器上验证过；Windows 10 未实测。
 
 ## 致谢
 
