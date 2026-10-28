@@ -598,7 +598,6 @@ internal sealed class MainForm : Form
 
     private readonly ContextMenuStrip _peerMenu = new();
     private PeerModel _peerMenuTarget;
-    private ToolStripMenuItem _miCopyPeerIp;
     private ToolStripMenuItem _miCopyV4;
     private ToolStripMenuItem _miCopyV6;
     private ToolStripMenuItem _miCopyAllIp;
@@ -625,7 +624,6 @@ internal sealed class MainForm : Form
         var v4 = PeerIps(peer, wantV6: false);
         var v6 = PeerIps(peer, wantV6: true);
 
-        _miCopyPeerIp.Enabled = hasIp || v4.Count > 0 || v6.Count > 0;
         _miCopyV4.Enabled = v4.Count > 0;
         _miCopyV6.Enabled = v6.Count > 0;
         _miCopyAllIp.Enabled = v4.Count + v6.Count > 0;
@@ -645,19 +643,17 @@ internal sealed class MainForm : Form
         if (_peerMenu.Items.Count > 0)
             return;
 
-        _miCopyPeerIp = new ToolStripMenuItem("复制 IP");
-
-        _miCopyV4 = new ToolStripMenuItem("IPv4（100.x）");
+        _miCopyV4 = new ToolStripMenuItem("复制 IPv4");
         _miCopyV4.Click += (_, _) => CopyPeerText(string.Join(Environment.NewLine, PeerIps(_peerMenuTarget, false)));
 
-        _miCopyV6 = new ToolStripMenuItem("IPv6（fd7a:…）");
+        _miCopyV6 = new ToolStripMenuItem("复制 IPv6");
         _miCopyV6.Click += (_, _) => CopyPeerText(string.Join(Environment.NewLine, PeerIps(_peerMenuTarget, true)));
 
-        _miCopyAllIp = new ToolStripMenuItem("全部 IP（每行一个）");
+        _miCopyAllIp = new ToolStripMenuItem("复制全部 IP");
         _miCopyAllIp.Click += (_, _) => CopyPeerText(string.Join(Environment.NewLine,
             PeerIps(_peerMenuTarget, false).Concat(PeerIps(_peerMenuTarget, true))));
 
-        _miCopyName = new ToolStripMenuItem("设备名（DNS 名称）");
+        _miCopyName = new ToolStripMenuItem("复制设备名");
         _miCopyName.Click += (_, _) =>
         {
             var peer = _peerMenuTarget;
@@ -665,12 +661,6 @@ internal sealed class MainForm : Form
                 return;
             CopyPeerText(string.IsNullOrWhiteSpace(peer.DnsName) ? peer.DisplayName : peer.DnsName);
         };
-
-        _miCopyPeerIp.DropDownItems.Add(_miCopyV4);
-        _miCopyPeerIp.DropDownItems.Add(_miCopyV6);
-        _miCopyPeerIp.DropDownItems.Add(_miCopyAllIp);
-        _miCopyPeerIp.DropDownItems.Add(new ToolStripSeparator());
-        _miCopyPeerIp.DropDownItems.Add(_miCopyName);
 
         _miSendToPeer = new ToolStripMenuItem("发送文件到这台…");
         _miSendToPeer.Click += async (_, _) => await SendFileToPeerAsync();
@@ -681,7 +671,11 @@ internal sealed class MainForm : Form
         _miPeerExitNode = new ToolStripMenuItem("设为出口节点");
         _miPeerExitNode.Click += async (_, _) => await ToggleExitNodeForPeerAsync();
 
-        _peerMenu.Items.Add(_miCopyPeerIp);
+        _peerMenu.Items.Add(_miCopyV4);
+        _peerMenu.Items.Add(_miCopyV6);
+        _peerMenu.Items.Add(_miCopyAllIp);
+        _peerMenu.Items.Add(_miCopyName);
+        _peerMenu.Items.Add(new ToolStripSeparator());
         _peerMenu.Items.Add(_miSendToPeer);
         _peerMenu.Items.Add(miDetail);
         _peerMenu.Items.Add(new ToolStripSeparator());

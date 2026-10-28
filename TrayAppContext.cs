@@ -33,10 +33,9 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem _miState = new() { Enabled = false };
     private readonly ToolStripMenuItem _miToggle = new("连接");
     private readonly ToolStripMenuItem _miExitNodes = new("出口节点");
-    private readonly ToolStripMenuItem _miCopyIp = new("复制本机 IP");
-    private readonly ToolStripMenuItem _miCopySelfV4 = new("IPv4（100.x）");
-    private readonly ToolStripMenuItem _miCopySelfV6 = new("IPv6（fd7a:…）");
-    private readonly ToolStripMenuItem _miCopySelfAll = new("全部 IP（每行一个）");
+    private readonly ToolStripMenuItem _miCopySelfV4 = new("复制本机 IPv4");
+    private readonly ToolStripMenuItem _miCopySelfV6 = new("复制本机 IPv6");
+    private readonly ToolStripMenuItem _miCopySelfAll = new("复制本机全部 IP");
     private readonly ToolStripMenuItem _miReset = new("恢复默认设置…");
 
     private MainForm _form;
@@ -146,10 +145,9 @@ internal sealed class TrayAppContext : ApplicationContext
         _miCopySelfV4.Click += (_, _) => CopySelfIp(false);
         _miCopySelfV6.Click += (_, _) => CopySelfIp(true);
         _miCopySelfAll.Click += (_, _) => CopySelfIp(null);
-        _miCopyIp.DropDownItems.Add(_miCopySelfV4);
-        _miCopyIp.DropDownItems.Add(_miCopySelfV6);
-        _miCopyIp.DropDownItems.Add(_miCopySelfAll);
-        _menu.Items.Add(_miCopyIp);
+        _menu.Items.Add(_miCopySelfV4);
+        _menu.Items.Add(_miCopySelfV6);
+        _menu.Items.Add(_miCopySelfAll);
 
         _menu.Items.Add(new ToolStripSeparator());
 
@@ -397,7 +395,6 @@ internal sealed class TrayAppContext : ApplicationContext
         _miToggle.Enabled = true;
         var selfV4 = SelfIps(false);
         var selfV6 = SelfIps(true);
-        _miCopyIp.Enabled = snapshot.SelfIps.Count > 0;
         _miCopySelfV4.Enabled = selfV4.Count > 0;
         _miCopySelfV6.Enabled = selfV6.Count > 0;
         _miCopySelfAll.Enabled = snapshot.SelfIps.Count > 0;
