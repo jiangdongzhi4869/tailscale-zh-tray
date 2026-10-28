@@ -50,7 +50,6 @@ internal static class SettingsCatalog
         new()
         {
             Id = "autoupdate",
-            Hint = "这是 Tailscale 官方客户端的自动更新开关，和本托盘工具无关。开启后官方客户端会自行升级（升级瞬间连接会断几秒）。",
             Label = "自动安装更新（Tailscale 官方客户端）",
             Get = s => s.AutoUpdate,
             ArgFor = v => $"set --auto-update={B(v)}"
