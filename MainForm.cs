@@ -223,12 +223,13 @@ internal sealed class MainForm : Form
         _list.MultiSelect = false;
         _list.BorderStyle = BorderStyle.FixedSingle;
         _list.BackColor = Color.White;
-        _list.Columns.Add("设备", 260);
-        _list.Columns.Add("地址", 165);
-        _list.Columns.Add("系统", 95);
-        _list.Columns.Add("状态", 70);
-        _list.Columns.Add("连接方式", 150);
-        _list.Columns.Add("延迟", 90);
+        _list.Columns.Add("设备", 230);
+        _list.Columns.Add("地址", 140);
+        _list.Columns.Add("系统", 80);
+        _list.Columns.Add("状态", 60);
+        _list.Columns.Add("连接方式", 125);
+        _list.Columns.Add("延迟", 80);
+        _list.Columns.Add("密钥过期", 175);
         _list.DoubleClick += (_, _) => OpenSelectedPeer();
         _list.MouseUp += OnListMouseUp;
 
@@ -559,6 +560,11 @@ internal sealed class MainForm : Form
                 item.SubItems.Add(peer.Online ? "在线" : "离线");
                 item.SubItems.Add(peer.ConnectionText);
                 item.SubItems.Add(peer.Online ? peer.LatencyText : "");
+                item.SubItems.Add(peer.KeyExpiryText);
+
+                if (peer.KeyExpiryWarning)
+                    item.SubItems[ColKeyExpiry].ForeColor = Color.FromArgb(185, 28, 28);
+
                 item.ForeColor = peer.Online ? Color.FromArgb(31, 41, 55) : Color.Silver;
                 _list.Items.Add(item);
             }
@@ -746,6 +752,7 @@ internal sealed class MainForm : Form
 
     private const int ColConnection = 4;
     private const int ColLatency = 5;
+    private const int ColKeyExpiry = 6;
 
     private PeerModel PeerAtPoint(int x, int y) =>
         _list.HitTest(x, y).Item?.Tag as PeerModel;

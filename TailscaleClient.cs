@@ -30,6 +30,27 @@ internal sealed class PeerModel
     /// <summary>最近一次 ping 测得的延迟，null 表示还没测过。</summary>
     public PeerLatency Latency;
 
+    /// <summary>节点密钥到期时间，default(0001-01-01) 表示永不过期。</summary>
+    public DateTimeOffset KeyExpiry;
+
+    public string KeyExpiryText
+    {
+        get
+        {
+            if (KeyExpiry.Year <= 1)
+                return "永不过期";
+
+            var days = (KeyExpiry.Date - DateTime.Today).Days;
+            if (days < 0)
+                return $"{KeyExpiry:yyyy-MM-dd}（已过期）";
+
+            return $"{KeyExpiry:yyyy-MM-dd}（剩 {days} 天）";
+        }
+    }
+
+    /// <summary>快到期或已过期，列表里用醒目颜色提示。</summary>
+    public bool KeyExpiryWarning => KeyExpiry.Year > 1 && (KeyExpiry.Date - DateTime.Today).Days <= 30;
+
     public string LatencyText =>
         Latency == null ? "—" : Latency.TimedOut ? "超时" : Latency.Ms < 0 ? "—" : $"{Latency.Ms} ms";
 
@@ -482,6 +503,7 @@ internal sealed class TailscaleClient
                     RxBytes = Long(value, "RxBytes"),
                     TxBytes = Long(value, "TxBytes"),
                     LastHandshake = Time(value, "LastHandshake"),
+                    KeyExpiry = Time(value, "KeyExpiry"),
                 });
             }
         }
