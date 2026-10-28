@@ -206,7 +206,6 @@ internal sealed class MainForm : Form
         {
             _picMascot.SizeMode = PictureBoxSizeMode.Zoom;
             _picMascot.BackColor = Color.Transparent;
-            _picMascot.Size = new Size(190, 200);
             page.Controls.Add(_picMascot);
             _picMascot.BringToFront();
             page.Resize += (_, _) => LayoutMascot(page);
@@ -216,14 +215,27 @@ internal sealed class MainForm : Form
         return page;
     }
 
-    /// <summary>吉祥物贴左下角，窗口变矮时跟着往上收，别被裁掉。</summary>
+    /// <summary>吉祥物默认高度（像素）；原图多大都一样，显示大小只由这里决定。</summary>
+    private const int MascotPreferredHeight = 200;
+
+    /// <summary>贴左下角；页面矮了等比缩小，永远不超出页面。</summary>
     private void LayoutMascot(TabPage page)
     {
-        if (_picMascot.Image == null)
+        var image = _picMascot.Image;
+        if (image == null)
             return;
 
-        _picMascot.Left = 22;
-        _picMascot.Top = Math.Max(0, page.ClientSize.Height - _picMascot.Height - 8);
+        var maxHeight = Math.Max(80, page.ClientSize.Height - 30);
+        var height = Math.Min(MascotPreferredHeight, maxHeight);
+        var width = Math.Max(1, (int)Math.Round(height * (image.Width / (double)image.Height)));
+
+        _picMascot.Size = new Size(width, height);
+        // 放右下角：左边的对比文字是左对齐长句，放左边会把它们盖住
+        _picMascot.Left = Math.Max(22, page.ClientSize.Width - width - 22);
+        _picMascot.Top = Math.Max(8, page.ClientSize.Height - height - 8);
+
+        // 右边留出吉祥物的宽度，文字提前换行，不会被压在图片底下
+        _lblSummary.Padding = new Padding(20, 14, width + 44, 14);
     }
 
     /// <summary>从 exe 旁边的 assets\mascot.png 读图；换图不用重新编译。</summary>
