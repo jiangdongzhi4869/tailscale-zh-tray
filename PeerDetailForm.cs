@@ -20,7 +20,9 @@ internal sealed class PeerDetailForm : Form
 
         Text = "设备详情 - " + (string.IsNullOrWhiteSpace(peer.DisplayName) ? "未命名设备" : peer.DisplayName);
         ClientSize = new Size(620, 540);
-        MinimumSize = new Size(520, 440);
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = false;
+        MinimizeBox = false;
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Microsoft YaHei UI", 9F);
         BackColor = Color.FromArgb(247, 248, 250);
@@ -87,8 +89,8 @@ internal sealed class PeerDetailForm : Form
         _output.Dock = DockStyle.Fill;
         _output.Multiline = true;
         _output.ReadOnly = true;
-        _output.ScrollBars = ScrollBars.Both;
-        _output.WordWrap = false;
+        _output.ScrollBars = ScrollBars.Vertical;
+        _output.WordWrap = true;
         _output.BackColor = Color.FromArgb(30, 32, 36);
         _output.ForeColor = Color.FromArgb(220, 223, 228);
         _output.Font = new Font("Consolas", 9.5F);
