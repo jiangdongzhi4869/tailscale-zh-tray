@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -12,6 +14,7 @@ internal sealed class PeerDetailForm : Form
 
     private readonly Button _btnPing = new();
     private readonly TextBox _output = new();
+    private readonly Label _dropZone = new();
 
     public PeerDetailForm(TailscaleClient client, PeerModel peer)
     {
@@ -79,6 +82,20 @@ internal sealed class PeerDetailForm : Form
         };
         bar.Controls.Add(tip);
 
+        // 拖放区：把文件拖进来就发给当前这台设备
+        _dropZone.Dock = DockStyle.Fill;
+        _dropZone.Text = "把文件拖到这里 → 直接发送给这台设备（Taildrop）";
+        _dropZone.TextAlign = ContentAlignment.MiddleCenter;
+        _dropZone.BorderStyle = BorderStyle.FixedSingle;
+        _dropZone.BackColor = Color.FromArgb(240, 253, 248);
+        _dropZone.ForeColor = Color.FromArgb(16, 163, 127);
+        _dropZone.Margin = new Padding(18, 2, 18, 6);
+        _dropZone.AllowDrop = true;
+        _dropZone.DragEnter += OnDropEnter;
+        _dropZone.DragOver += OnDropEnter;
+        _dropZone.DragLeave += (_, _) => SetDropHighlight(false);
+        _dropZone.DragDrop += async (_, e) => await OnDropAsync(e);
+
         var panel = new Panel
         {
             Dock = DockStyle.Fill,
@@ -102,16 +119,18 @@ internal sealed class PeerDetailForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             BackColor = Color.FromArgb(247, 248, 250)
         };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 206));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         layout.Controls.Add(info, 0, 0);
-        layout.Controls.Add(bar, 0, 1);
-        layout.Controls.Add(panel, 0, 2);
+        layout.Controls.Add(_dropZone, 0, 1);
+        layout.Controls.Add(bar, 0, 2);
+        layout.Controls.Add(panel, 0, 3);
 
         Controls.Add(layout);
     }
@@ -172,5 +191,92 @@ internal sealed class PeerDetailForm : Form
             _peer.Latency = PingOutputParser.Parse(text);
 
         _btnPing.Enabled = true;
+    }
+
+    private static readonly Color DropNormal = Color.FromArgb(240, 253, 248);
+    private static readonly Color DropActive = Color.FromArgb(204, 251, 241);
+
+    private void SetDropHighlight(bool active) =>
+        _dropZone.BackColor = active ? DropActive : DropNormal;
+
+    private void OnDropEnter(object sender, DragEventArgs e)
+    {
+        var isFile = e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop);
+        e.Effect = isFile ? DragDropEffects.Copy : DragDropEffects.None;
+        SetDropHighlight(isFile);
+    }
+
+    private async Task OnDropAsync(DragEventArgs e)
+    {
+        SetDropHighlight(false);
+
+        if (e.Data?.GetData(DataFormats.FileDrop) is not string[] dropped || dropped.Length == 0)
+            return;
+
+        if (!_peer.Online)
+        {
+            _output.Text = "这台设备当前离线，无法接收文件。";
+            return;
+        }
+
+        var files = FileDropHelper.Expand(dropped);
+        if (files.Count == 0)
+        {
+            _output.Text = "拖进来的内容里没有可发送的文件。";
+            return;
+        }
+
+        if (files.Count > FileDropHelper.MaxFiles)
+        {
+            _output.Text = $"一次最多发送 {FileDropHelper.MaxFiles} 个文件，这次是 {files.Count} 个。";
+            return;
+        }
+
+        var answer = MessageBox.Show(this,
+            $"用 Taildrop 把这 {files.Count} 个文件发送到「{_peer.DisplayName}」？{Environment.NewLine}{Environment.NewLine}" +
+            FileDropHelper.Preview(files),
+            "发送文件", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+        if (answer != DialogResult.Yes)
+            return;
+
+        await SendFilesAsync(files);
+    }
+
+    private async Task SendFilesAsync(IReadOnlyList<string> files)
+    {
+        var device = string.IsNullOrWhiteSpace(_peer.PrimaryIp) ? _peer.DisplayName : _peer.PrimaryIp;
+        var ok = 0;
+        var lines = new List<string>();
+
+        _output.Text = $"正在向 {_peer.DisplayName} 发送 {files.Count} 个文件…";
+
+        for (var i = 0; i < files.Count; i++)
+        {
+            var file = files[i];
+            var result = await Task.Run(() => _client.SendFile(file, device));
+
+            if (IsDisposed)
+                return;
+
+            var name = System.IO.Path.GetFileName(file);
+            if (result.Code == 0)
+            {
+                ok++;
+                lines.Add($"[成功] {name}");
+            }
+            else
+            {
+                var detail = !string.IsNullOrWhiteSpace(result.Err) ? result.Err : result.Out;
+                lines.Add($"[失败] {name}{Environment.NewLine}{detail.Trim()}");
+            }
+
+            _output.Text = $"发送中 {i + 1}/{files.Count}（成功 {ok}）…";
+        }
+
+        if (!IsDisposed)
+            _output.Text =
+                $"发送完成：成功 {ok} / {files.Count}" + Environment.NewLine + Environment.NewLine +
+                string.Join(Environment.NewLine + Environment.NewLine, lines);
     }
 }

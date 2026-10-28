@@ -813,9 +813,16 @@ internal sealed class MainForm : Form
     private PeerModel PeerAtPoint(int x, int y) =>
         _list.HitTest(x, y).Item?.Tag as PeerModel;
 
+    /// <summary>拖放事件的坐标是屏幕坐标，必须先换算成列表内坐标再命中测试。</summary>
+    private PeerModel PeerAtDragPoint(DragEventArgs e)
+    {
+        var point = _list.PointToClient(new Point(e.X, e.Y));
+        return PeerAtPoint(point.X, point.Y);
+    }
+
     private void OnListDragOver(object sender, DragEventArgs e)
     {
-        var peer = PeerAtPoint(e.X, e.Y);
+        var peer = PeerAtDragPoint(e);
         var fileDrop = e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop);
 
         e.Effect = fileDrop && peer != null && peer.Online
@@ -825,7 +832,7 @@ internal sealed class MainForm : Form
 
     private async Task OnListDragDropAsync(DragEventArgs e)
     {
-        var peer = PeerAtPoint(e.X, e.Y);
+        var peer = PeerAtDragPoint(e);
         if (peer == null || e.Data == null)
             return;
 
@@ -839,7 +846,7 @@ internal sealed class MainForm : Form
         if (e.Data.GetData(DataFormats.FileDrop) is not string[] dropped || dropped.Length == 0)
             return;
 
-        var files = ExpandDroppedPaths(dropped);
+        var files = FileDropHelper.Expand(dropped);
         if (files.Count == 0)
         {
             MessageBox.Show(this, "拖进来的内容里没有可发送的文件。", "发送文件",
@@ -847,17 +854,15 @@ internal sealed class MainForm : Form
             return;
         }
 
-        if (files.Count > 500)
+        if (files.Count > FileDropHelper.MaxFiles)
         {
             MessageBox.Show(this,
-                $"一次最多发送 500 个文件，这次是 {files.Count} 个。请分批拖入。",
+                $"一次最多发送 {FileDropHelper.MaxFiles} 个文件，这次是 {files.Count} 个。请分批拖入。",
                 "发送文件", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        var preview = string.Join(Environment.NewLine, files.Take(8).Select(System.IO.Path.GetFileName));
-        if (files.Count > 8)
-            preview += $"{Environment.NewLine}…以及另外 {files.Count - 8} 个文件";
+        var preview = FileDropHelper.Preview(files);
 
         var answer = MessageBox.Show(this,
             $"用 Taildrop 把这些文件发送到「{peer.DisplayName}」？{Environment.NewLine}{Environment.NewLine}" +
@@ -877,26 +882,6 @@ internal sealed class MainForm : Form
             MessageBox.Show(this, "发送失败：" + ex.Message, "发送文件",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
-    }
-
-    private static List<string> ExpandDroppedPaths(IEnumerable<string> paths)
-    {
-        var files = new List<string>();
-        foreach (var path in paths)
-        {
-            try
-            {
-                if (System.IO.Directory.Exists(path))
-                    files.AddRange(System.IO.Directory.GetFiles(path, "*", System.IO.SearchOption.AllDirectories));
-                else if (System.IO.File.Exists(path))
-                    files.Add(path);
-            }
-            catch (Exception ex)
-            {
-                Logger.Log($"展开拖放路径失败: {path} => {ex.Message}");
-            }
-        }
-        return files;
     }
 
     /// <summary>设备列表的「连接方式」「延迟」两列局部刷新，不重绘整个列表。</summary>
