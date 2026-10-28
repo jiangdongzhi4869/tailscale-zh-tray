@@ -18,22 +18,10 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private const string AdminConsoleUrl = "https://login.tailscale.com/admin/machines";
 
-    // 后台轮询间隔，主界面状态栏的文字也读这个值，避免改了一处忘了另一处
-    public const int RefreshIntervalMs = 60000;
-
-    public static int RefreshIntervalSeconds => RefreshIntervalMs / 1000;
-
-    // 延迟探测：每轮只测一台在线设备，轮着来。20 台设备约 3 分钟转一圈，
-    // 不用把整轮 ping 塞进一次刷新里（那会让界面卡住十几秒）
-    public const int LatencyProbeIntervalMs = 10000;
-
-    public static int LatencyProbeIntervalSeconds => LatencyProbeIntervalMs / 1000;
-
+    // 不做后台轮询：状态和延迟只在用户操作时刷新（点「刷新」、连接/断开、改设置之后）
     private readonly TailscaleClient _client = new();
     private readonly NotifyIcon _tray = new();
     private readonly ContextMenuStrip _menu = new();
-    private readonly System.Windows.Forms.Timer _timer = new();
-    private readonly System.Windows.Forms.Timer _probeTimer = new();
     private readonly Dictionary<string, PeerLatency> _latency = new();
     private readonly Dictionary<string, Icon> _icons = new();
     private readonly Dictionary<string, ToolStripMenuItem> _miSettings = new();
@@ -50,7 +38,6 @@ internal sealed class TrayAppContext : ApplicationContext
     private bool _busy;
     private bool _probing;
     private bool _updatingMenu;
-    private int _probeCursor;
 
     public Icon AppIcon => GetIcon("normal");
 
@@ -65,14 +52,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _tray.Visible = true;
         _tray.DoubleClick += (_, _) => ShowMainForm();
 
-        _timer.Interval = RefreshIntervalMs;
-        _timer.Tick += async (_, _) => await RefreshAsync();
-        _timer.Start();
-
-        _probeTimer.Interval = LatencyProbeIntervalMs;
-        _probeTimer.Tick += async (_, _) => await ProbeNextLatencyAsync();
-        _probeTimer.Start();
-
+        // 启动时读一次状态（托盘图标和提示要有个初始值），之后不再自动刷新
         _ = RefreshAsync();
 
         if (showWindowOnStart)
@@ -89,6 +69,11 @@ internal sealed class TrayAppContext : ApplicationContext
         var miOpen = new ToolStripMenuItem("打开主界面");
         miOpen.Click += (_, _) => ShowMainForm();
         _menu.Items.Add(miOpen);
+
+        // 没有后台轮询，托盘里得留个手动刷新的入口
+        var miRefresh = new ToolStripMenuItem("刷新状态");
+        miRefresh.Click += async (_, _) => await RefreshAsync();
+        _menu.Items.Add(miRefresh);
 
         _miToggle.Click += async (_, _) => await ToggleAsync();
         _menu.Items.Add(_miToggle);
@@ -160,7 +145,8 @@ internal sealed class TrayAppContext : ApplicationContext
         _tray.ContextMenuStrip = _menu;
     }
 
-    public async Task RefreshAsync()
+    /// <param name="withLatency">用户主动刷新时为 true：顺手把在线设备的延迟也测一遍。</param>
+    public async Task RefreshAsync(bool withLatency = false)
     {
         if (_busy)
             return;
@@ -177,11 +163,17 @@ internal sealed class TrayAppContext : ApplicationContext
             var snapshot = await Task.Run(() => _client.Fetch());
             _snap = snapshot;
             Apply();
+
+            if (withLatency)
+                await MeasureLatenciesAsync(snapshot);
+            else
+                _form?.ShowRefreshStatus();
         }
         catch (Exception ex)
         {
             Logger.Log("刷新失败: " + ex);
             ApplyUnavailable("读取状态失败");
+            _form?.ShowRefreshStatus();
         }
         finally
         {
@@ -210,49 +202,58 @@ internal sealed class TrayAppContext : ApplicationContext
         }
     }
 
-    private async Task ProbeNextLatencyAsync()
+    /// <summary>
+    /// 逐台测在线设备的延迟。只在用户点「刷新」时调用一次，
+    /// 不做定时轮询 —— 没有用户动作就不该产生 ping 流量。
+    /// </summary>
+    private async Task MeasureLatenciesAsync(TailscaleSnapshot snapshot)
     {
-        if (_probing)
+        if (_probing || snapshot == null || !snapshot.IsRunning || !_client.Available)
+        {
+            _form?.ShowRefreshStatus();
             return;
-
-        var snapshot = _snap;
-        if (snapshot == null || !snapshot.IsRunning || !_client.Available)
-            return;
+        }
 
         var online = snapshot.Peers
             .Where(p => p.Online && LatencyKey(p) != null)
             .ToList();
 
         if (online.Count == 0)
+        {
+            _form?.ShowRefreshStatus();
             return;
-
-        if (_probeCursor >= online.Count)
-            _probeCursor = 0;
-
-        var peer = online[_probeCursor++ % online.Count];
-        var ip = LatencyKey(peer);
+        }
 
         _probing = true;
         try
         {
-            // 发 3 个包：第一个常常还是 DERP 中继，最后一个多半已打洞成直连
-            var result = await Task.Run(() => _client.Ping(ip, 3, 12000));
-            var sample = PingOutputParser.Parse(result.Out);
+            for (var i = 0; i < online.Count; i++)
+            {
+                var peer = online[i];
+                var ip = LatencyKey(peer);
 
-            var key = LatencyKey(peer);
-            if (key != null)
-                _latency[key] = sample;
+                _form?.SetStatus($"正在测延迟 {i + 1}/{online.Count}：{peer.DisplayName} …");
 
-            AttachLatency(_snap);
-            _form?.RefreshLatencyColumn();
+                // 发 3 个包：第一个常常还是 DERP 中继，最后一个多半已打洞成直连
+                var result = await Task.Run(() => _client.Ping(ip, 3, 12000));
+                var sample = PingOutputParser.Parse(result.Out);
+
+                var key = LatencyKey(peer);
+                if (key != null)
+                    _latency[key] = sample;
+
+                AttachLatency(_snap);
+                _form?.RefreshLatencyColumn();
+            }
         }
         catch (Exception ex)
         {
-            Logger.Log("延迟探测失败: " + ex);
+            Logger.Log("延迟测量失败: " + ex);
         }
         finally
         {
             _probing = false;
+            _form?.ShowRefreshStatus();
         }
     }
 
@@ -557,8 +558,6 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void Quit()
     {
-        _timer.Stop();
-        _probeTimer.Stop();
 
         try { _tray.Visible = false; _tray.Dispose(); } catch { }
 

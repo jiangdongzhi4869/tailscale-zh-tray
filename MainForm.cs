@@ -169,7 +169,7 @@ internal sealed class MainForm : Form
         _btnRefresh.Text = "刷新";
         _btnRefresh.Width = 90;
         StyleButton(_btnRefresh, primary: false);
-        _btnRefresh.Click += async (_, _) => await _ctx.RefreshAsync();
+        _btnRefresh.Click += async (_, _) => await _ctx.RefreshAsync(withLatency: true);
 
         _btnExitNode.Text = "出口节点";
         _btnExitNode.Width = 120;
@@ -255,7 +255,7 @@ internal sealed class MainForm : Form
         _btnPeerRefresh.Text = "刷新";
         _btnPeerRefresh.Width = 90;
         StyleButton(_btnPeerRefresh, primary: false);
-        _btnPeerRefresh.Click += async (_, _) => await _ctx.RefreshAsync();
+        _btnPeerRefresh.Click += async (_, _) => await _ctx.RefreshAsync(withLatency: true);
 
         bar.Controls.Add(_btnPeerDetail);
         bar.Controls.Add(_btnPeerRefresh);
@@ -487,9 +487,37 @@ internal sealed class MainForm : Form
         FillDeviceList(snapshot);
         UpdateSettings(snapshot);
 
-        _statusLabel.Text =
-            $"上次刷新：{DateTime.Now:HH:mm:ss}    每 {TrayAppContext.RefreshIntervalSeconds} 秒刷新状态" +
-            $"    延迟每 {TrayAppContext.LatencyProbeIntervalSeconds} 秒轮流测 1 台";
+        ShowRefreshStatus();
+    }
+
+    /// <summary>状态栏的「已完成刷新」文字。没有定时刷新，全靠用户点。</summary>
+    public void ShowRefreshStatus()
+    {
+        if (IsDisposed)
+            return;
+
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action(ShowRefreshStatus));
+            return;
+        }
+
+        _statusLabel.Text = $"上次刷新：{DateTime.Now:HH:mm:ss}    点「刷新」更新状态与延迟";
+    }
+
+    /// <summary>状态栏临时文字（例如正在测延迟）。</summary>
+    public void SetStatus(string text)
+    {
+        if (IsDisposed)
+            return;
+
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action<string>(SetStatus), text);
+            return;
+        }
+
+        _statusLabel.Text = text;
     }
 
     private void FillDeviceList(TailscaleSnapshot snapshot)
