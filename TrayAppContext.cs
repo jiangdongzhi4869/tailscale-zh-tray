@@ -50,7 +50,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _tray.Visible = true;
         _tray.DoubleClick += (_, _) => ShowMainForm();
 
-        _timer.Interval = 5000;
+        _timer.Interval = 60000;
         _timer.Tick += async (_, _) => await RefreshAsync();
         _timer.Start();
 
