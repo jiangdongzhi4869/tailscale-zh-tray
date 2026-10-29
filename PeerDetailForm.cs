@@ -85,7 +85,7 @@ internal sealed class PeerDetailForm : Form
 
         // 拖放区：把文件拖进来就发给当前这台设备
         _dropZone.Dock = DockStyle.Fill;
-        _dropZone.Text = "把文件拖到这里 → 直接发送给这台设备（Taildrop）";
+        _dropZone.Text = "拖一个文件到这里 → 直接发送给这台设备（Taildrop）";
         _dropZone.TextAlign = ContentAlignment.MiddleCenter;
         _dropZone.BorderStyle = BorderStyle.FixedSingle;
         _dropZone.BackColor = Color.FromArgb(240, 253, 248);
@@ -278,7 +278,8 @@ internal sealed class PeerDetailForm : Form
 
     private void OnDropEnter(object sender, DragEventArgs e)
     {
-        var isFile = e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop);
+        // 只接受单个文件：多选或文件夹不给"可放下"的光标
+        var isFile = FileDropHelper.IsSingleFile(e.Data);
         e.Effect = isFile ? DragDropEffects.Copy : DragDropEffects.None;
         SetDropHighlight(isFile);
     }
@@ -287,7 +288,7 @@ internal sealed class PeerDetailForm : Form
     {
         SetDropHighlight(false);
 
-        if (e.Data?.GetData(DataFormats.FileDrop) is not string[] dropped || dropped.Length == 0)
+        if (e.Data?.GetData(DataFormats.FileDrop) is not string[] dropped)
             return;
 
         if (!_peer.Online)
@@ -296,64 +297,42 @@ internal sealed class PeerDetailForm : Form
             return;
         }
 
-        var files = FileDropHelper.Expand(dropped);
-        if (files.Count == 0)
+        if (!FileDropHelper.TryGetSingleFile(dropped, out var file, out var error))
         {
-            _output.Text = "拖进来的内容里没有可发送的文件。";
-            return;
-        }
-
-        if (files.Count > FileDropHelper.MaxFiles)
-        {
-            _output.Text = $"一次最多发送 {FileDropHelper.MaxFiles} 个文件，这次是 {files.Count} 个。";
+            _output.Text = error;
             return;
         }
 
         var answer = MessageBox.Show(this,
-            $"用 Taildrop 把这 {files.Count} 个文件发送到「{_peer.DisplayName}」？{Environment.NewLine}{Environment.NewLine}" +
-            FileDropHelper.Preview(files),
+            $"用 Taildrop 把这个文件发送到「{_peer.DisplayName}」？{Environment.NewLine}{Environment.NewLine}" +
+            System.IO.Path.GetFileName(file),
             "发送文件", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
 
         if (answer != DialogResult.Yes)
             return;
 
-        await SendFilesAsync(files);
+        await SendFileAsync(file);
     }
 
-    private async Task SendFilesAsync(IReadOnlyList<string> files)
+    private async Task SendFileAsync(string file)
     {
         var device = string.IsNullOrWhiteSpace(_peer.PrimaryIp) ? _peer.DisplayName : _peer.PrimaryIp;
-        var ok = 0;
-        var lines = new List<string>();
+        var name = System.IO.Path.GetFileName(file);
 
-        _output.Text = $"正在向 {_peer.DisplayName} 发送 {files.Count} 个文件…";
+        _output.Text = $"正在向 {_peer.DisplayName} 发送：{name} …";
 
-        for (var i = 0; i < files.Count; i++)
+        var result = await Task.Run(() => _client.SendFile(file, device));
+
+        if (IsDisposed)
+            return;
+
+        if (result.Code == 0)
         {
-            var file = files[i];
-            var result = await Task.Run(() => _client.SendFile(file, device));
-
-            if (IsDisposed)
-                return;
-
-            var name = System.IO.Path.GetFileName(file);
-            if (result.Code == 0)
-            {
-                ok++;
-                lines.Add($"[成功] {name}");
-            }
-            else
-            {
-                var detail = !string.IsNullOrWhiteSpace(result.Err) ? result.Err : result.Out;
-                lines.Add($"[失败] {name}{Environment.NewLine}{detail.Trim()}");
-            }
-
-            _output.Text = $"发送中 {i + 1}/{files.Count}（成功 {ok}）…";
+            _output.Text = $"已发送：{name}";
+            return;
         }
 
-        if (!IsDisposed)
-            _output.Text =
-                $"发送完成：成功 {ok} / {files.Count}" + Environment.NewLine + Environment.NewLine +
-                string.Join(Environment.NewLine + Environment.NewLine, lines);
+        var detail = !string.IsNullOrWhiteSpace(result.Err) ? result.Err : result.Out;
+        _output.Text = $"发送失败：{name}" + Environment.NewLine + Environment.NewLine + detail.Trim();
     }
 }

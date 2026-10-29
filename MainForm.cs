@@ -856,14 +856,14 @@ internal sealed class MainForm : Form
         using var dialog = new OpenFileDialog
         {
             Title = $"发送文件到「{peer.DisplayName}」",
-            Multiselect = true,
+            Multiselect = false,
             CheckFileExists = true
         };
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
             return;
 
-        await SendFilesToAsync(peer, dialog.FileNames);
+        await SendFileToAsync(peer, dialog.FileName);
     }
 
     private async Task ToggleExitNodeForPeerAsync()
@@ -892,7 +892,8 @@ internal sealed class MainForm : Form
     private void OnListDragOver(object sender, DragEventArgs e)
     {
         var peer = PeerAtDragPoint(e);
-        var fileDrop = e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop);
+        // 只接受单个文件：多选或文件夹直接不给"可放下"的光标
+        var fileDrop = FileDropHelper.IsSingleFile(e.Data);
 
         e.Effect = fileDrop && peer != null && peer.Online
             ? DragDropEffects.Copy
@@ -912,30 +913,19 @@ internal sealed class MainForm : Form
             return;
         }
 
-        if (e.Data.GetData(DataFormats.FileDrop) is not string[] dropped || dropped.Length == 0)
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] dropped)
             return;
 
-        var files = FileDropHelper.Expand(dropped);
-        if (files.Count == 0)
+        if (!FileDropHelper.TryGetSingleFile(dropped, out var file, out var error))
         {
-            MessageBox.Show(this, "拖进来的内容里没有可发送的文件。", "发送文件",
+            MessageBox.Show(this, error, "发送文件",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
-        if (files.Count > FileDropHelper.MaxFiles)
-        {
-            MessageBox.Show(this,
-                $"一次最多发送 {FileDropHelper.MaxFiles} 个文件，这次是 {files.Count} 个。请分批拖入。",
-                "发送文件", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        var preview = FileDropHelper.Preview(files);
-
         var answer = MessageBox.Show(this,
-            $"用 Taildrop 把这些文件发送到「{peer.DisplayName}」？{Environment.NewLine}{Environment.NewLine}" +
-            $"共 {files.Count} 个文件：{Environment.NewLine}{preview}",
+            $"用 Taildrop 把这个文件发送到「{peer.DisplayName}」？{Environment.NewLine}{Environment.NewLine}" +
+            System.IO.Path.GetFileName(file),
             "发送文件", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
 
         if (answer != DialogResult.Yes)
@@ -943,7 +933,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            await SendFilesToAsync(peer, files);
+            await SendFileToAsync(peer, file);
         }
         catch (Exception ex)
         {
@@ -1087,7 +1077,7 @@ internal sealed class MainForm : Form
         using var dialog = new OpenFileDialog
         {
             Title = "选择要发送的文件",
-            Multiselect = true,
+            Multiselect = false,
             CheckFileExists = true
         };
 
@@ -1108,11 +1098,11 @@ internal sealed class MainForm : Form
         }
 
         SelectToolsTab();
-        await SendFilesToAsync(target, dialog.FileNames);
+        await SendFileToAsync(target, dialog.FileName);
     }
 
     /// <summary>把一批文件发到指定设备，结果显示在工具页输出框。</summary>
-    private async Task SendFilesToAsync(PeerModel target, IReadOnlyList<string> files)
+    private async Task SendFileToAsync(PeerModel target, string file)
     {
         var device = string.IsNullOrWhiteSpace(target.PrimaryIp) ? target.DisplayName : target.PrimaryIp;
 
@@ -1120,48 +1110,33 @@ internal sealed class MainForm : Form
         if (!UiAlive)
             return;
 
-        var lines = new List<string>();
-        var succeeded = 0;
-
-        for (var i = 0; i < files.Count; i++)
-        {
-            if (!UiAlive)
-                return;
-
-            var file = files[i];
-
-            // 大文件走中继可能要很久，逐个小文件也是逐次更新，别一直停在一句"正在发送"
-            _txtTools.Text =
-                $"正在向 {target.DisplayName} 发送 {i + 1}/{files.Count}…" + Environment.NewLine + Environment.NewLine +
-                System.IO.Path.GetFileName(file);
-
-            var result = await Task.Run(() => _ctx.Client.SendFile(file, device));
-
-            // 传输过程中窗口可能已经被关掉，别再去碰已销毁的控件
-            if (!UiAlive)
-                return;
-
-            var name = System.IO.Path.GetFileName(file);
-
-            if (result.Code == 0)
-            {
-                succeeded++;
-                lines.Add($"[成功] {name}");
-            }
-            else
-            {
-                var detail = !string.IsNullOrWhiteSpace(result.Err) ? result.Err : result.Out;
-                lines.Add($"[失败] {name}{Environment.NewLine}{detail.Trim()}");
-            }
-        }
+        var name = System.IO.Path.GetFileName(file);
 
         if (!UiAlive)
             return;
 
         _txtTools.Text =
-            $"目标设备：{target.DisplayName}（{device}）{Environment.NewLine}" +
-            $"成功 {succeeded} / {files.Count}" + Environment.NewLine + Environment.NewLine +
-            string.Join(Environment.NewLine + Environment.NewLine, lines);
+            $"正在向 {target.DisplayName} 发送：{name} …" + Environment.NewLine + Environment.NewLine +
+            "大文件走中继可能要等一会儿，这期间窗口可以正常操作。";
+
+        var result = await Task.Run(() => _ctx.Client.SendFile(file, device));
+
+        // 传输过程中窗口可能已经被关掉，别再去碰已销毁的控件
+        if (!UiAlive)
+            return;
+
+        if (result.Code == 0)
+        {
+            _txtTools.Text =
+                $"已发送：{name}" + Environment.NewLine + Environment.NewLine +
+                $"目标设备：{target.DisplayName}（{device}）";
+            return;
+        }
+
+        var detail = !string.IsNullOrWhiteSpace(result.Err) ? result.Err : result.Out;
+        _txtTools.Text =
+            $"发送失败：{name}" + Environment.NewLine + Environment.NewLine +
+            detail.Trim();
     }
 
     /// <summary>接收的文件由官方客户端自动放进下载目录，这里只负责把目录打开。</summary>

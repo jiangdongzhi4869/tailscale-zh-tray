@@ -1,53 +1,56 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 
 namespace TailscaleZHTray;
 
+/// <summary>拖放只接受单个文件：多选和文件夹一律拒绝，并给出原因。</summary>
 internal static class FileDropHelper
 {
-    /// <summary>一次最多发多少个文件，太多就拒绝，免得误拖整个盘。</summary>
-    public const int MaxFiles = 500;
-
-    /// <summary>把拖进来的路径展开成文件列表；文件夹递归进去。</summary>
-    public static List<string> Expand(IEnumerable<string> paths)
+    /// <summary>校验拖进来的内容；通过时 file 是那个文件的完整路径。</summary>
+    public static bool TryGetSingleFile(string[] dropped, out string file, out string error)
     {
-        var files = new List<string>();
-        if (paths == null)
-            return files;
+        file = null;
+        error = null;
 
-        foreach (var path in paths)
+        if (dropped == null || dropped.Length == 0)
         {
-            try
-            {
-                if (Directory.Exists(path))
-                    files.AddRange(Directory.GetFiles(path, "*", SearchOption.AllDirectories));
-                else if (File.Exists(path))
-                    files.Add(path);
-            }
-            catch (Exception ex)
-            {
-                Logger.Log($"展开拖放路径失败: {path} => {ex.Message}");
-            }
+            error = "没有检测到文件。";
+            return false;
         }
 
-        return files;
+        if (dropped.Length > 1)
+        {
+            error = $"一次只能发送一个文件，这次拖了 {dropped.Length} 个。";
+            return false;
+        }
+
+        var path = dropped[0];
+
+        if (Directory.Exists(path))
+        {
+            error = "不支持发送文件夹。请先压缩成一个文件，或者一次只拖一个文件。";
+            return false;
+        }
+
+        if (!File.Exists(path))
+        {
+            error = "这个路径读不到文件。";
+            return false;
+        }
+
+        file = path;
+        return true;
     }
 
-    /// <summary>确认框里展示的预览文本（最多列 8 个）。</summary>
-    public static string Preview(IReadOnlyList<string> files)
+    /// <summary>拖到半路时判断能不能接收：只放行"恰好一个文件"。</summary>
+    public static bool IsSingleFile(IDataObject data)
     {
-        if (files.Count == 0)
-            return "";
+        if (data == null || !data.GetDataPresent(DataFormats.FileDrop))
+            return false;
 
-        var text = "";
-        var shown = Math.Min(files.Count, 8);
-        for (var i = 0; i < shown; i++)
-            text += (i == 0 ? "" : Environment.NewLine) + Path.GetFileName(files[i]);
+        if (data.GetData(DataFormats.FileDrop) is not string[] dropped || dropped.Length != 1)
+            return false;
 
-        if (files.Count > shown)
-            text += $"{Environment.NewLine}…以及另外 {files.Count - shown} 个文件";
-
-        return text;
+        return !Directory.Exists(dropped[0]);
     }
 }
