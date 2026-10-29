@@ -450,6 +450,10 @@ internal sealed class TrayAppContext : ApplicationContext
                 "如果这台机器还没有登录 Tailscale，浏览器会自动打开授权页面；" +
                 "如果没有自动打开，请回到主界面点『打开登录授权页』。",
                 "Tailscale 中文托盘", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            // 刚 up 时后端还在 Starting 这类过渡态，只看一次会一直停在「正在启动…」
+            await PollUntilSettledAsync();
+            return;
         }
 
         await Task.Delay(1200);
@@ -733,6 +737,29 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         MessageBox.Show(detail.Trim(), title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
+
+    /// <summary>
+    /// 刚发起连接时后端要经历 Starting 之类的过渡状态，只刷新一次界面会一直停在「正在启动…」。
+    /// 这里最多盯 30 秒，状态稳定就停；一直没稳定下来就提示用户检查 Tailscale 是否在运行。
+    /// </summary>
+    private async Task PollUntilSettledAsync()
+    {
+        for (var i = 0; i < 15; i++)
+        {
+            await Task.Delay(2000);
+            await RefreshAsync();
+
+            var state = (_snap?.BackendState ?? "").Trim().ToLowerInvariant();
+            if (state == "running" || state == "stopped" ||
+                state == "needslogin" || state == "needsmachineauth")
+                return;
+        }
+
+        MessageBox.Show(
+            "等了 30 秒，连接状态还没稳定下来。" + Environment.NewLine + Environment.NewLine +
+            "如果 Tailscale 服务没有在运行，请先打开 Tailscale 客户端，再回来点「刷新」。",
+            "Tailscale 中文托盘", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
 
     public static bool NeedsLogin(TailscaleSnapshot snapshot)
