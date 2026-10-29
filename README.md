@@ -1,5 +1,15 @@
 # Tailscale 中文托盘 / Tailscale ZH Tray
 
+> ### ⚠️ 本项目已归档，不再更新
+>
+> - **永久可用** —— 仓库长期保留、不会删除，代码可以随时克隆、编译、使用。
+> - **不接受任何提交** —— Issue 和 Pull Request 都已关闭，不必再提。
+> - **欢迎 Fork** —— 想继续改就自己 Fork 一份维护，不需要申请，注明出处即可。
+>
+> 归档前的最终版本是 **1.4.19**，功能完整、可直接使用；本项目不再修复问题、不再加新功能。
+
+---
+
 > **本项目与 Tailscale Inc. 无任何关联，是非官方第三方程序。**
 > This is an **unofficial** third-party project, not affiliated with Tailscale Inc.
 
