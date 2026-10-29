@@ -75,22 +75,6 @@ internal sealed class PeerModel
             return "—";
         }
     }
-
-    public string TrafficText => $"↓ {FormatBytes(RxBytes)}  ↑ {FormatBytes(TxBytes)}";
-
-    public static string FormatBytes(long bytes)
-    {
-        if (bytes <= 0) return "0 B";
-        string[] units = { "B", "KB", "MB", "GB", "TB" };
-        double value = bytes;
-        var unit = 0;
-        while (value >= 1024 && unit < units.Length - 1)
-        {
-            value /= 1024;
-            unit++;
-        }
-        return unit == 0 ? $"{value:0} {units[unit]}" : $"{value:0.0} {units[unit]}";
-    }
 }
 
 internal sealed class PeerLatency
@@ -291,7 +275,7 @@ internal sealed class TailscaleClient
             {
                 try { p.Kill(entireProcessTree: true); } catch { }
                 p.WaitForExit(3000);
-                return (-1, SafeResult(stdout), SafeResult(stderr) + "\n（命令执行超时）");
+                return (-1, Drained(stdout), Drained(stderr) + "\n（命令执行超时）");
             }
 
             return (p.ExitCode, SafeResult(stdout), SafeResult(stderr));
@@ -300,6 +284,19 @@ internal sealed class TailscaleClient
         {
             Logger.Log($"Run 失败: {args} => {ex}");
             return (-2, "", ex.Message);
+        }
+    }
+
+    /// <summary>进程已退出或被杀掉之后取剩余输出（管道已关闭，不会挂住）。</summary>
+    private static string Drained(Task<string> task)
+    {
+        try
+        {
+            return task.GetAwaiter().GetResult();
+        }
+        catch
+        {
+            return "";
         }
     }
 

@@ -717,6 +717,21 @@ internal sealed class TrayAppContext : ApplicationContext
         var detail = !string.IsNullOrWhiteSpace(stderr) ? stderr : stdout;
         if (string.IsNullOrWhiteSpace(detail))
             detail = "命令执行失败，但没有返回错误信息。";
+
+        // tailscale.exe 权限不足时只回一句英文，用户看不出要干什么
+        if (detail.Contains("Access is denied", StringComparison.OrdinalIgnoreCase) ||
+            detail.Contains("拒绝访问", StringComparison.OrdinalIgnoreCase) ||
+            detail.Contains("may not be running", StringComparison.OrdinalIgnoreCase) ||
+            detail.Contains("Failed to connect to local tailscaled", StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show(
+                "这个操作需要管理员权限（当前是普通权限在跑）。" + Environment.NewLine + Environment.NewLine +
+                "请退出本程序，右键 TailscaleZHTray.exe 选「以管理员身份运行」，再试一次。" + Environment.NewLine + Environment.NewLine +
+                "原始错误：" + detail.Trim(),
+                "需要管理员权限", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         MessageBox.Show(detail.Trim(), title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
 

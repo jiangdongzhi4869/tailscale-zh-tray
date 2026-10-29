@@ -12,6 +12,9 @@ internal static class Program
     /// <summary>第二个实例用它唤醒第一个实例的主窗口。</summary>
     public const string ShowSignalName = "TailscaleZHTray_Show_v1";
 
+    /// <summary>内部错误提示只弹一次，避免同一个异常反复刷屏。</summary>
+    private static bool crashTipShown;
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -24,19 +27,25 @@ internal static class Program
         using var mutex = new Mutex(true, "TailscaleZHTray_SingleInstance_v1", out var createdNew);
         if (!createdNew)
         {
-            // 已经有实例在跑：通知它把窗口叫到前台，自己安静退出
-            try
+            // 已经有实例在跑：通知它把窗口叫到前台，自己安静退出。
+            // 另一头刚抢到 Mutex、事件句柄还没建好的那一瞬间会有竞态，先重试一下再决定。
+            for (var attempt = 0; attempt < 10; attempt++)
             {
-                if (EventWaitHandle.TryOpenExisting(ShowSignalName, out var signal))
+                try
                 {
-                    using (signal)
-                        signal.Set();
-                    return;
+                    if (EventWaitHandle.TryOpenExisting(ShowSignalName, out var signal))
+                    {
+                        using (signal)
+                            signal.Set();
+                        return;
+                    }
                 }
-            }
-            catch
-            {
-                // 事件没建起来，退回弹框提示
+                catch
+                {
+                    // 事件还没建起来，等一下再试
+                }
+
+                Thread.Sleep(200);
             }
 
             MessageBox.Show(
@@ -53,7 +62,22 @@ internal static class Program
         // 任何 UI 线程异常都交给 ThreadException 处理，不让进程直接退出
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
 
-        Application.ThreadException += (_, e) => Logger.Log("UI 线程异常: " + e.Exception);
+        Application.ThreadException += (_, e) =>
+        {
+            Logger.Log("UI 线程异常: " + e.Exception);
+
+            // 只在第一次弹，避免同一个错误刷屏；用户至少知道去哪儿翻日志
+            if (crashTipShown)
+                return;
+            crashTipShown = true;
+
+            MessageBox.Show(
+                "程序遇到一个内部错误，功能可能没能完成。已经写进日志了。" + Environment.NewLine + Environment.NewLine +
+                "日志位置：" + Logger.Dir,
+                "Tailscale 中文托盘",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Logger.Log("未处理异常: " + e.ExceptionObject);
 
         var showWindowOnStart = args.Any(a =>
