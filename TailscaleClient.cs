@@ -23,8 +23,6 @@ internal sealed class PeerModel
     public bool ExitNodeOption;
     public string Relay = "";
     public string CurAddr = "";
-    public long RxBytes;
-    public long TxBytes;
     public DateTimeOffset LastHandshake;
 
     /// <summary>最近一次 ping 测得的延迟，null 表示还没测过。</summary>
@@ -109,6 +107,9 @@ internal static class PingOutputParser
         var matches = PongRegex.Matches(output);
         if (matches.Count == 0)
         {
+            // 官方哪天改了 ping 输出格式就会走到这里，记一行，
+            // 免得延迟列悄悄全变成「—」却没人知道为什么
+            Logger.Log("ping 输出无法解析：" + output.Trim());
             result.TimedOut = true;
             return result;
         }
@@ -278,7 +279,7 @@ internal sealed class TailscaleClient
                 return (-1, Drained(stdout), Drained(stderr) + "\n（命令执行超时）");
             }
 
-            return (p.ExitCode, SafeResult(stdout), SafeResult(stderr));
+            return (p.ExitCode, Drained(stdout), Drained(stderr));
         }
         catch (Exception ex)
         {
@@ -293,18 +294,6 @@ internal sealed class TailscaleClient
         try
         {
             return task.GetAwaiter().GetResult();
-        }
-        catch
-        {
-            return "";
-        }
-    }
-
-    private static string SafeResult(Task<string> task)
-    {
-        try
-        {
-            return task.Wait(3000) ? task.Result : "";
         }
         catch
         {
@@ -494,8 +483,6 @@ internal sealed class TailscaleClient
                     ExitNodeOption = Bool(value, "ExitNodeOption"),
                     Relay = Str(value, "Relay"),
                     CurAddr = Str(value, "CurAddr"),
-                    RxBytes = Long(value, "RxBytes"),
-                    TxBytes = Long(value, "TxBytes"),
                     LastHandshake = Time(value, "LastHandshake"),
                     KeyExpiry = Time(value, "KeyExpiry"),
                 });

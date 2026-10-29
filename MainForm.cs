@@ -1120,13 +1120,21 @@ internal sealed class MainForm : Form
         if (!UiAlive)
             return;
 
-        _txtTools.Text = $"正在向 {target.DisplayName} 发送 {files.Count} 个文件…";
-
         var lines = new List<string>();
         var succeeded = 0;
 
-        foreach (var file in files)
+        for (var i = 0; i < files.Count; i++)
         {
+            if (!UiAlive)
+                return;
+
+            var file = files[i];
+
+            // 大文件走中继可能要很久，逐个小文件也是逐次更新，别一直停在一句"正在发送"
+            _txtTools.Text =
+                $"正在向 {target.DisplayName} 发送 {i + 1}/{files.Count}…" + Environment.NewLine + Environment.NewLine +
+                System.IO.Path.GetFileName(file);
+
             var result = await Task.Run(() => _ctx.Client.SendFile(file, device));
 
             // 传输过程中窗口可能已经被关掉，别再去碰已销毁的控件

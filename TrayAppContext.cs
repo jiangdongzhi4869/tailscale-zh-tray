@@ -47,6 +47,12 @@ internal sealed class TrayAppContext : ApplicationContext
     private bool _pendingWithLatency;
     private bool _updatingMenu;
     private CancellationTokenSource _scanCts;
+
+    /// <summary>正在退出：后台循环看到它就收手，别再碰已经释放掉的托盘和窗体。</summary>
+    private bool _closing;
+
+    /// <summary>连接后正在盯状态：这期间不允许再点连接/断开。</summary>
+    private bool _polling;
     private readonly Control _marshaller = new();
     private EventWaitHandle _showSignal;
     private Thread _showWaiter;
@@ -211,7 +217,7 @@ internal sealed class TrayAppContext : ApplicationContext
     }
 
     /// <param name="withLatency">用户主动刷新时为 true：顺手把在线设备的延迟也测一遍。</param>
-    public async Task RefreshAsync(bool withLatency = false)
+    public async Task<bool> RefreshAsync(bool withLatency = false)
     {
         if (_busy)
         {
@@ -220,7 +226,7 @@ internal sealed class TrayAppContext : ApplicationContext
             _refreshPending = true;
             _pendingWithLatency |= withLatency;
             _form?.SetStatus("正在刷新中，已排队再刷一次…");
-            return;
+            return true;
         }
 
         _busy = true;
@@ -229,7 +235,7 @@ internal sealed class TrayAppContext : ApplicationContext
             if (!_client.Available)
             {
                 ApplyUnavailable("未找到 tailscale.exe");
-                return;
+                return false;
             }
 
             var snapshot = await Task.Run(() => _client.Fetch());
@@ -240,12 +246,15 @@ internal sealed class TrayAppContext : ApplicationContext
                 await MeasureLatenciesAsync(snapshot);
             else
                 _form?.ShowRefreshStatus();
+
+            return true;
         }
         catch (Exception ex)
         {
             Logger.Log("刷新失败: " + ex);
             ApplyUnavailable("读取状态失败");
             _form?.ShowRefreshStatus();
+            return false;
         }
         finally
         {
@@ -392,7 +401,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _miToggle.Text = snapshot.IsRunning
             ? "断开连接"
             : NeedsLogin(snapshot) ? "登录并连接" : "连接";
-        _miToggle.Enabled = true;
+        _miToggle.Enabled = !_polling;
         var selfV4 = SelfIps(false);
         var selfV6 = SelfIps(true);
         _miCopySelfV4.Enabled = selfV4.Count > 0;
@@ -422,6 +431,10 @@ internal sealed class TrayAppContext : ApplicationContext
 
     public async Task ToggleAsync()
     {
+        // 连接后正在盯状态时别再点一次，否则会并发下发 up/down
+        if (_polling)
+            return;
+
         if (!_client.Available)
         {
             MessageBox.Show("没有找到 tailscale.exe，请确认 Tailscale 已正确安装。",
@@ -686,7 +699,8 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void Quit()
     {
-        // 强行退出：先掐掉正在跑的延迟扫描（含中间的 5 秒等待），不等它自己结束
+        // 强行退出：先掐掉正在跑的延迟扫描和连接后的状态轮询，不等它们自己结束
+        _closing = true;
         try { _scanCts?.Cancel(); } catch { }
 
         try { _tray.Visible = false; _tray.Dispose(); } catch { }
@@ -745,21 +759,56 @@ internal sealed class TrayAppContext : ApplicationContext
     /// </summary>
     private async Task PollUntilSettledAsync()
     {
-        for (var i = 0; i < 15; i++)
+        var failures = 0;
+
+        _polling = true;
+        try
         {
-            await Task.Delay(2000);
-            await RefreshAsync();
+            for (var i = 0; i < 15 && !_closing; i++)
+            {
+                await Task.Delay(2000);
+                if (_closing)
+                    return;
 
-            var state = (_snap?.BackendState ?? "").Trim().ToLowerInvariant();
-            if (state == "running" || state == "stopped" ||
-                state == "needslogin" || state == "needsmachineauth")
+                var ok = await RefreshAsync();
+                if (_closing)
+                    return;
+
+                // 刷新连续失败说明连不上 tailscaled，再等也是空转
+                failures = ok ? 0 : failures + 1;
+                if (failures >= 2)
+                    return;
+
+                var state = (_snap?.BackendState ?? "").Trim().ToLowerInvariant();
+                if (state == "running" || state == "stopped" ||
+                    state == "needslogin" || state == "needsmachineauth")
+                    return;
+
+                // NoState / 空状态是终态：服务没起来，别等满 30 秒才说
+                if (state.Length == 0 || state == "nostate")
+                {
+                    MessageBox.Show(
+                        "Tailscale 服务好像没有在运行。" + Environment.NewLine + Environment.NewLine +
+                        "请先打开 Tailscale 客户端，再回来点「刷新」。",
+                        "Tailscale 中文托盘", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
+            if (_closing)
                 return;
-        }
 
-        MessageBox.Show(
-            "等了 30 秒，连接状态还没稳定下来。" + Environment.NewLine + Environment.NewLine +
-            "如果 Tailscale 服务没有在运行，请先打开 Tailscale 客户端，再回来点「刷新」。",
-            "Tailscale 中文托盘", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(
+                "等了 30 秒，连接状态还没稳定下来。" + Environment.NewLine + Environment.NewLine +
+                "如果 Tailscale 服务没有在运行，请先打开 Tailscale 客户端，再回来点「刷新」。",
+                "Tailscale 中文托盘", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _polling = false;
+            if (!_closing)
+                _miToggle.Enabled = _snap != null;
+        }
     }
 
     public static bool NeedsLogin(TailscaleSnapshot snapshot)
