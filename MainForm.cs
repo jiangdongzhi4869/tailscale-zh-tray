@@ -550,11 +550,16 @@ internal sealed class MainForm : Form
             .Distinct()
             .ToList();
 
+        var tsVersion = string.IsNullOrWhiteSpace(snapshot.Version)
+            ? "未知"
+            : snapshot.Version;
+
         _lblSummary.Text =
             $"后端状态：{stateText}" + Environment.NewLine + Environment.NewLine +
             $"对端设备：{snapshot.Peers.Count} 台（在线 {onlineCount}）" + Environment.NewLine +
             $"当前出口节点：{(string.IsNullOrWhiteSpace(snapshot.ExitNodeName) ? "未使用" : snapshot.ExitNodeName)}" + Environment.NewLine +
-            $"健康提示：{(health.Count == 0 ? "无" : string.Join("；", health))}" + Environment.NewLine + Environment.NewLine +
+            $"健康提示：{(health.Count == 0 ? "无" : string.Join("；", health))}" + Environment.NewLine +
+            $"Tailscale 版本：{tsVersion}" + Environment.NewLine + Environment.NewLine +
             "提示：鼠标悬停托盘图标可看当前状态；右键托盘图标可快速连接、切换出口节点。";
 
         FillDeviceList(snapshot);
