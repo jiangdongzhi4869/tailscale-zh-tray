@@ -178,7 +178,16 @@ internal sealed class MainForm : Form
                 return;
             }
 
-            await _ctx.RefreshAsync(withLatency: true);
+            _btnRefresh.Enabled = false;
+            try
+            {
+                await _ctx.RefreshAsync(withLatency: true);
+            }
+            finally
+            {
+                if (!IsDisposed)
+                    _btnRefresh.Enabled = true;
+            }
         };
 
         _btnExitNode.Text = "出口节点";
@@ -335,7 +344,16 @@ internal sealed class MainForm : Form
                 return;
             }
 
-            await _ctx.RefreshAsync(withLatency: true);
+            _btnPeerRefresh.Enabled = false;
+            try
+            {
+                await _ctx.RefreshAsync(withLatency: true);
+            }
+            finally
+            {
+                if (!IsDisposed)
+                    _btnPeerRefresh.Enabled = true;
+            }
         };
 
         var peerTip = new Label
@@ -1328,14 +1346,14 @@ internal sealed class MainForm : Form
         ShowAccounts();
     }
 
-    public void UpdateError(string message)
+    public void UpdateError(string message, string detail = null)
     {
         if (IsDisposed)
             return;
 
         if (InvokeRequired)
         {
-            BeginInvoke(new Action(() => UpdateError(message)));
+            BeginInvoke(new Action(() => UpdateError(message, detail)));
             return;
         }
 
@@ -1348,7 +1366,11 @@ internal sealed class MainForm : Form
         _lblSelf.Text = "本机：—        地址：—";
         _lblExit.Text = "出口节点：—";
         _lnkAuth.Visible = false;
-        _lblSummary.Text = "无法读取 Tailscale 状态，请确认 Tailscale 服务正在运行。";
+        // 标题只放短句，完整原因放这里（可换行，不会被窗口右边界裁掉）
+        _lblSummary.Text = string.IsNullOrWhiteSpace(detail)
+            ? "无法读取 Tailscale 状态，请确认 Tailscale 服务正在运行。"
+            : detail + Environment.NewLine + Environment.NewLine +
+              "请确认 Tailscale 服务正在运行，然后点「刷新」重试。";
         _list.Items.Clear();
         _statusLabel.Text = "无法读取 Tailscale 状态。";
     }

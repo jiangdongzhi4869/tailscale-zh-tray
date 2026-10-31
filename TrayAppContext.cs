@@ -53,6 +53,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     /// <summary>最近一次刷新失败的原因，主窗口第一次打开时用它把错误显示出来。</summary>
     private string _lastError;
+    private string _lastErrorDetail;
     private bool _busy;
     private bool _probing;
     private bool _refreshPending;
@@ -275,9 +276,7 @@ internal sealed class TrayAppContext : ApplicationContext
             var reason = (ex.Message ?? "").Trim();
             if (reason.Length > 120)
                 reason = reason[..120];
-            ApplyUnavailable(string.IsNullOrEmpty(reason)
-                ? "读取状态失败"
-                : "读取状态失败：" + reason);
+            ApplyUnavailable("读取状态失败", string.IsNullOrEmpty(reason) ? null : reason);
 
             _form?.ShowRefreshStatus();
             return RefreshOutcome.Failed;
@@ -409,6 +408,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private void Apply()
     {
         _lastError = null;
+        _lastErrorDetail = null;
 
         var snapshot = _snap;
         if (snapshot == null)
@@ -454,11 +454,16 @@ internal sealed class TrayAppContext : ApplicationContext
         _form?.UpdateView(snapshot, true);
     }
 
-    private void ApplyUnavailable(string message)
+    /// <param name="title">短标题，给 14pt 的状态标签用。</param>
+    /// <param name="detail">完整原因，给下方可换行的文本块用。</param>
+    private void ApplyUnavailable(string title, string detail = null)
     {
         // 关键：丢掉旧快照，否则再打开主窗口会把过期数据当实时数据画上去
-        _lastError = message;
+        _lastError = title;
+        _lastErrorDetail = detail;
         _snap = null;
+
+        var message = string.IsNullOrWhiteSpace(detail) ? title : title + "：" + detail;
 
         _miState.Text = "状态：" + message;
         _tray.Icon = GetIcon("error");
@@ -467,7 +472,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _tray.Text = tip.Length > 63 ? tip[..63] : tip;
 
         _miToggle.Enabled = false;
-        _form?.UpdateError(message);
+        _form?.UpdateError(title, detail);
     }
 
     public async Task ToggleAsync()
@@ -746,7 +751,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
         // 窗口刚建好时 _snap 可能为空但错误还在，必须把错误画上去，别给一块白板
         if (_lastError != null)
-            _form.UpdateError(_lastError);
+            _form.UpdateError(_lastError, _lastErrorDetail);
         else if (_snap != null)
             _form.UpdateView(_snap, _client.Available);
     }
