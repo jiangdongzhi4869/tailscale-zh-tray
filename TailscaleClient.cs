@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace TailscaleZHTray;
@@ -54,6 +55,18 @@ internal sealed class PeerModel
 
     public string DisplayName =>
         !string.IsNullOrWhiteSpace(HostName) ? HostName.Trim() : (DnsName ?? "").Trim();
+
+    /// <summary>系统名称统一显示（列表页和详情页共用，避免一个 windows 一个 Windows）。</summary>
+    public string OsText => (Os ?? "").ToLowerInvariant() switch
+    {
+        "windows" => "Windows",
+        "linux" => "Linux",
+        "macos" => "macOS",
+        "ios" => "iOS",
+        "android" => "Android",
+        "freebsd" => "FreeBSD",
+        _ => string.IsNullOrWhiteSpace(Os) ? "—" : Os
+    };
 
     public string PrimaryIp =>
         Ips.FirstOrDefault(x => x.Contains('.')) ?? Ips.FirstOrDefault() ?? "";
@@ -160,6 +173,9 @@ internal sealed class TailscaleSnapshot
     public bool HasUser;
     public string ExitNodeIp = "";
     public bool LoggedOut;
+
+    /// <summary>`tailscale get --json` 是否读到并解析成功。false 时设置项不可信。</summary>
+    public bool PrefsLoaded;
     public List<PeerModel> Peers = new();
 
     // 设置项（来自 tailscale get --json）
@@ -301,41 +317,113 @@ internal sealed class TailscaleClient
         }
     }
 
-    /// <summary>发起可能阻塞的命令（如 up 会等待登录），不等待退出。</summary>
-    public void StartDetached(string args)
+    /// <summary>
+    /// 发起可能阻塞的命令（如 up 会等待登录），不等待退出。
+    /// 返回是否成功启动；退出码和 stderr 通过 <paramref name="onExit"/> 回调给出，
+    /// 这样权限不足/服务没起来这类错误不会再被吞掉。
+    /// </summary>
+    public bool StartDetached(string args, Action<int, string> onExit = null)
     {
         if (!Available)
-            return;
+            return false;
 
         try
         {
-            // 注意：不重定向输出时不能设置 StandardOutputEncoding，否则 Process.Start 会抛异常
             var psi = new ProcessStartInfo
             {
                 FileName = ExePath,
                 Arguments = args,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
             };
 
-            var p = Process.Start(psi);
-            Logger.Log($"已发起命令: tailscale {args} (pid={p?.Id})");
+            var p = new Process { StartInfo = psi };
+            var err = new StringBuilder();
+            var output = new StringBuilder();
+            var finished = 0;
 
-            if (p != null)
+            p.ErrorDataReceived += (_, e) =>
             {
-                p.EnableRaisingEvents = true;
-                p.Exited += (_, _) =>
+                if (e.Data != null)
                 {
-                    try { Logger.Log($"命令结束: tailscale {args} (code={p.ExitCode})"); }
-                    catch { }
-                };
+                    lock (err)
+                        err.AppendLine(e.Data);
+                }
+            };
+            p.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data != null)
+                {
+                    lock (output)
+                        output.AppendLine(e.Data);
+                }
+            };
+
+            void Finish()
+            {
+                // Exited 事件和"启动后发现已退出"的兜底可能撞车，只处理一次
+                if (Interlocked.Exchange(ref finished, 1) != 0)
+                    return;
+
+                try
+                {
+                    p.WaitForExit(2000);   // 等异步读取把管道冲干净
+
+                    int code;
+                    try { code = p.ExitCode; }
+                    catch { code = -1; }
+
+                    string error;
+                    lock (err)
+                        error = err.ToString().Trim();
+                    if (string.IsNullOrWhiteSpace(error))
+                    {
+                        lock (output)
+                            error = output.ToString().Trim();
+                    }
+
+                    Logger.Log($"命令结束: tailscale {args} (code={code})" +
+                               (string.IsNullOrWhiteSpace(error)
+                                   ? ""
+                                   : " err=" + error.Replace(Environment.NewLine, " ")));
+
+                    onExit?.Invoke(code, error);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"StartDetached 收尾失败: {ex.Message}");
+                }
+                finally
+                {
+                    try { p.Dispose(); } catch { }
+                }
             }
+
+            p.Exited += (_, _) => Finish();
+
+            if (!p.Start())
+            {
+                p.Dispose();
+                return false;
+            }
+
+            Logger.Log($"已发起命令: tailscale {args} (pid={p.Id})");
+            p.BeginOutputReadLine();
+            p.BeginErrorReadLine();
+            p.EnableRaisingEvents = true;
+
+            // 命令秒退时 Exited 可能来不及触发，主动补一次
+            if (p.HasExited)
+                Finish();
+
+            return true;
         }
         catch (Exception ex)
         {
             Logger.Log($"StartDetached 失败: tailscale {args} => {ex}");
+            return false;
         }
     }
 
@@ -358,6 +446,7 @@ internal sealed class TailscaleClient
             try
             {
                 ParsePrefs(prefs.Out, snapshot);
+                snapshot.PrefsLoaded = true;
             }
             catch (Exception ex)
             {
@@ -413,7 +502,7 @@ internal sealed class TailscaleClient
     private static string Quote(string value) =>
         "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
 
-    public void Up() => StartDetached("up");
+    public bool Up(Action<int, string> onExit = null) => StartDetached("up", onExit);
 
     private static void ParsePrefs(string json, TailscaleSnapshot snapshot)
     {
@@ -451,9 +540,9 @@ internal sealed class TailscaleClient
         snapshot.HasUser = root.TryGetProperty("User", out var user) &&
                            user.ValueKind == JsonValueKind.Object;
 
+        // NoState 是"后端还没上报状态"的过渡态（服务刚启动/重启中），不等于登出
         snapshot.LoggedOut =
-            string.Equals(snapshot.BackendState, "NeedsLogin", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(snapshot.BackendState, "NoState", StringComparison.OrdinalIgnoreCase);
+            string.Equals(snapshot.BackendState, "NeedsLogin", StringComparison.OrdinalIgnoreCase);
 
         if (root.TryGetProperty("Self", out var self) && self.ValueKind == JsonValueKind.Object)
         {

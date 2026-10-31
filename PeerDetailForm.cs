@@ -11,6 +11,7 @@ internal sealed class PeerDetailForm : Form
 {
     private readonly TailscaleClient _client;
     private readonly PeerModel _peer;
+    private readonly Action _latencyUpdated;
 
     private readonly Button _btnPing = new();
     private readonly TextBox _output = new();
@@ -19,10 +20,11 @@ internal sealed class PeerDetailForm : Form
     private Label _valLatency;
     private Label _valStatus;
 
-    public PeerDetailForm(TailscaleClient client, PeerModel peer)
+    public PeerDetailForm(TailscaleClient client, PeerModel peer, Action latencyUpdated = null)
     {
         _client = client;
         _peer = peer;
+        _latencyUpdated = latencyUpdated;
 
         Text = "设备详情 - " + (string.IsNullOrWhiteSpace(peer.DisplayName) ? "未命名设备" : peer.DisplayName);
         ClientSize = new Size(620, 540);
@@ -31,6 +33,7 @@ internal sealed class PeerDetailForm : Form
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Microsoft YaHei UI", 9F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.FromArgb(247, 248, 250);
 
         var info = new TableLayoutPanel
@@ -48,7 +51,7 @@ internal sealed class PeerDetailForm : Form
         AddRow(info, "设备名称", Safe(peer.DisplayName));
         AddRow(info, "DNS 名称", Safe(peer.DnsName));
         AddRow(info, "IP 地址", Safe(string.Join("  /  ", peer.Ips)));
-        AddRow(info, "系统", Safe(peer.Os));
+        AddRow(info, "系统", Safe(peer.OsText));
         _valStatus = AddRow(info, "状态", peer.Online ? "在线" : "离线");
         _valConnection = AddRow(info, "连接方式", peer.ConnectionText);
         _valLatency = AddRow(info, "延迟", LatencyText());
@@ -260,11 +263,12 @@ internal sealed class PeerDetailForm : Form
             (string.IsNullOrWhiteSpace(text) ? "(无输出)" : text) +
             (string.IsNullOrWhiteSpace(error) ? "" : $"{Environment.NewLine}{Environment.NewLine}[错误]{Environment.NewLine}{error}");
 
-        // 顺手把这次结果记为最新的延迟数据，设备列表那边也会跟着更新
+        // 顺手把这次结果记为最新的延迟数据，并通知设备列表刷新这一列
         if (result.Code == 0 && !string.IsNullOrWhiteSpace(text))
         {
             _peer.Latency = PingOutputParser.Parse(text);
             UpdateInfoRows();
+            _latencyUpdated?.Invoke();
         }
 
         _btnPing.Enabled = true;

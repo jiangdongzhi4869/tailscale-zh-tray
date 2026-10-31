@@ -34,8 +34,11 @@ internal sealed class MainForm : Form
     private readonly Button _btnPeerRefresh = new();
 
     private readonly Dictionary<string, CheckBox> _settingChecks = new();
+    private readonly Label _lblPrefsWarning = new();
 
     private readonly Button _btnReset = new();
+
+    private TabPage _toolsPage;
 
     private readonly Button _btnNetcheck = new();
     private readonly Button _btnSendFile = new();
@@ -61,6 +64,7 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(820, 600);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Microsoft YaHei UI", 9F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         Icon = ctx.AppIcon;
         BackColor = Color.FromArgb(247, 248, 250);
 
@@ -162,7 +166,17 @@ internal sealed class MainForm : Form
         _btnRefresh.Text = "刷新";
         _btnRefresh.Width = 90;
         StyleButton(_btnRefresh, primary: false);
-        _btnRefresh.Click += async (_, _) => await _ctx.RefreshAsync(withLatency: true);
+        _btnRefresh.Click += async (_, _) =>
+        {
+            // 正在测延迟时再点会把整轮扫描排队重跑一遍，直接忽略
+            if (_ctx.IsBusy)
+            {
+                _statusLabel.Text = "正在刷新中，请稍候…";
+                return;
+            }
+
+            await _ctx.RefreshAsync(withLatency: true);
+        };
 
         _btnExitNode.Text = "出口节点";
         _btnExitNode.Width = 120;
@@ -310,7 +324,16 @@ internal sealed class MainForm : Form
         _btnPeerRefresh.Text = "刷新";
         _btnPeerRefresh.Width = 90;
         StyleButton(_btnPeerRefresh, primary: false);
-        _btnPeerRefresh.Click += async (_, _) => await _ctx.RefreshAsync(withLatency: true);
+        _btnPeerRefresh.Click += async (_, _) =>
+        {
+            if (_ctx.IsBusy)
+            {
+                _statusLabel.Text = "正在刷新中，请稍候…";
+                return;
+            }
+
+            await _ctx.RefreshAsync(withLatency: true);
+        };
 
         var peerTip = new Label
         {
@@ -366,10 +389,19 @@ internal sealed class MainForm : Form
         _btnReset.Click += async (_, _) => await _ctx.ResetDefaultsAsync();
         page.Controls.Add(_btnReset);
 
+        _lblPrefsWarning.AutoSize = false;
+        _lblPrefsWarning.Location = new Point(20, y + 46);
+        _lblPrefsWarning.Size = new Size(860, 44);
+        _lblPrefsWarning.ForeColor = Color.FromArgb(185, 28, 28);
+        _lblPrefsWarning.Visible = false;
+        _lblPrefsWarning.Text =
+            "当前 Tailscale 版本不支持读取设置（需要 `tailscale get` 命令），设置项已禁用，请升级客户端。";
+        page.Controls.Add(_lblPrefsWarning);
+
         var hint = new Label
         {
             AutoSize = false,
-            Location = new Point(20, y + 46),
+            Location = new Point(20, y + 96),
             Size = new Size(860, 90),
             ForeColor = Color.Gray,
             Text =
@@ -465,6 +497,7 @@ internal sealed class MainForm : Form
         table.Controls.Add(bar, 0, 0);
         table.Controls.Add(textPanel, 0, 1);
         page.Controls.Add(table);
+        _toolsPage = page;
         return page;
     }
 
@@ -620,7 +653,7 @@ internal sealed class MainForm : Form
                 var name = string.IsNullOrWhiteSpace(peer.DisplayName) ? "(未命名设备)" : peer.DisplayName;
                 var item = new ListViewItem(name) { Tag = peer };
                 item.SubItems.Add(peer.PrimaryIp);
-                item.SubItems.Add(OsName(peer.Os));
+                item.SubItems.Add(peer.OsText);
                 item.SubItems.Add(peer.Online ? "在线" : "离线");
                 item.SubItems.Add(peer.ConnectionText);
                 item.SubItems.Add(peer.Online ? peer.LatencyText : "");
@@ -978,13 +1011,22 @@ internal sealed class MainForm : Form
 
     private void UpdateSettings(TailscaleSnapshot snapshot)
     {
+        var loaded = snapshot?.PrefsLoaded ?? false;
+
         _updatingSettings = true;
         foreach (var spec in SettingsCatalog.All)
         {
             if (_settingChecks.TryGetValue(spec.Id, out var check))
-                check.Checked = spec.Get(snapshot);
+            {
+                // 读不到设置时不能显示一套假的勾选状态
+                check.Checked = loaded && spec.Get(snapshot);
+                check.Enabled = loaded;
+            }
         }
         _updatingSettings = false;
+
+        _btnReset.Enabled = loaded;
+        _lblPrefsWarning.Visible = !loaded;
     }
 
     private async Task OnSettingChangedAsync(CheckBox check)
@@ -994,6 +1036,15 @@ internal sealed class MainForm : Form
 
         if (check.Tag is not ToggleSpec spec)
             return;
+
+        if (_snap == null || !_snap.PrefsLoaded)
+        {
+            SetCheck(spec, !check.Checked);
+            MessageBox.Show(this,
+                "当前 Tailscale 版本不支持读取设置（需要 tailscale get 命令），请先升级客户端。",
+                "修改设置", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
 
         var want = check.Checked;
         var confirm = spec.Confirm?.Invoke(want);
@@ -1103,9 +1154,6 @@ internal sealed class MainForm : Form
             return;
 
         var name = System.IO.Path.GetFileName(file);
-
-        if (!UiAlive)
-            return;
 
         _txtTools.Text =
             $"正在向 {target.DisplayName} 发送：{name} …" + Environment.NewLine + Environment.NewLine +
@@ -1232,7 +1280,7 @@ internal sealed class MainForm : Form
         if (_list.SelectedItems[0].Tag is not PeerModel peer)
             return;
 
-        using var dialog = new PeerDetailForm(_ctx.Client, peer);
+        using var dialog = new PeerDetailForm(_ctx.Client, peer, RefreshLatencyColumn);
         dialog.ShowDialog(this);
     }
 
@@ -1241,7 +1289,7 @@ internal sealed class MainForm : Form
         try
         {
             System.IO.Directory.CreateDirectory(Logger.Dir);
-            Process.Start(new ProcessStartInfo("explorer.exe", Logger.Dir) { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{Logger.Dir}\"") { UseShellExecute = true });
         }
         catch (Exception ex)
         {
@@ -1253,18 +1301,18 @@ internal sealed class MainForm : Form
     public void SelectToolsTab()
     {
         // 只切换页面，绝不自动执行任何命令；必须用户手动点按钮
-        _tabs.SelectedIndex = 3;
+        _tabs.SelectedTab = _toolsPage;
     }
 
     public void ShowToolsAndSendFile()
     {
-        _tabs.SelectedIndex = 3;
+        _tabs.SelectedTab = _toolsPage;
         _ = StartSendFileAsync();
     }
 
     public void ShowToolsAndAccounts()
     {
-        _tabs.SelectedIndex = 3;
+        _tabs.SelectedTab = _toolsPage;
         ShowAccounts();
     }
 
@@ -1279,6 +1327,10 @@ internal sealed class MainForm : Form
             return;
         }
 
+        // 丢弃旧快照，别让过期设备列表继续参与发送文件等操作
+        _snap = null;
+        _btnToggle.Enabled = false;
+
         _lblState.Text = message;
         _lblState.ForeColor = Color.FromArgb(185, 28, 28);
         _lblSelf.Text = "本机：—        地址：—";
@@ -1289,16 +1341,8 @@ internal sealed class MainForm : Form
         _statusLabel.Text = "无法读取 Tailscale 状态。";
     }
 
-    private static string OsName(string os) => (os ?? "").ToLowerInvariant() switch
-    {
-        "windows" => "Windows",
-        "linux" => "Linux",
-        "macos" => "macOS",
-        "ios" => "iOS",
-        "android" => "Android",
-        "freebsd" => "FreeBSD",
-        _ => string.IsNullOrWhiteSpace(os) ? "—" : os
-    };
+    /// <summary>退出前强制把列宽落盘（程序走 ExitThread，OnFormClosing 不会触发）。</summary>
+    public void PersistColumnWidths() => SaveColumnWidths();
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {

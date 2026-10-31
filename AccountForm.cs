@@ -11,6 +11,9 @@ internal sealed class AccountForm : Form
 {
     private readonly TailscaleClient _client;
 
+    // 每次刷新账号列表都 new Font 会堆积 GDI 句柄，这里复用一份并在窗口关闭时释放
+    private readonly Font _boldFont = new("Microsoft YaHei UI", 9F, FontStyle.Bold);
+
     private readonly ListView _list = new();
     private readonly Button _btnSwitch = new();
     private readonly Button _btnAdd = new();
@@ -26,6 +29,7 @@ internal sealed class AccountForm : Form
         MinimumSize = new Size(520, 340);
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Microsoft YaHei UI", 9F);
+        AutoScaleMode = AutoScaleMode.Dpi;
 
         var table = new TableLayoutPanel
         {
@@ -142,7 +146,7 @@ internal sealed class AccountForm : Form
                 row.SubItems.Add(selected ? "是" : "");
                 if (selected)
                 {
-                    row.Font = new Font(_list.Font, FontStyle.Bold);
+                    row.Font = _boldFont;
                 }
 
                 _list.Items.Add(row);
@@ -161,6 +165,14 @@ internal sealed class AccountForm : Form
         {
             _list.EndUpdate();
         }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _boldFont.Dispose();
+
+        base.Dispose(disposing);
     }
 
     private static string GetString(JsonElement element, string name) =>

@@ -53,7 +53,8 @@ internal static class KnownFolders
         {
             var path = DownloadsPath;
             Directory.CreateDirectory(path);
-            Process.Start(new ProcessStartInfo("explorer.exe", path) { UseShellExecute = true });
+            // 路径含空格时必须自己加引号，Arguments 不会自动加
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
         }
         catch (Exception ex)
         {

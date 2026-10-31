@@ -19,6 +19,7 @@ internal sealed class PickPeerForm : Form
         MinimumSize = new Size(360, 280);
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Microsoft YaHei UI", 9F);
+        AutoScaleMode = AutoScaleMode.Dpi;
 
         var items = peers.ToList();
 

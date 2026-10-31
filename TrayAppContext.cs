@@ -12,6 +12,14 @@ using System.Windows.Forms;
 
 namespace TailscaleZHTray;
 
+/// <summary>刷新结果：排队不等于成功，失败要能被调用方区分出来。</summary>
+internal enum RefreshOutcome
+{
+    Completed,
+    Queued,
+    Failed
+}
+
 internal sealed class TrayAppContext : ApplicationContext
 {
     [DllImport("user32.dll", SetLastError = true)]
@@ -31,6 +39,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly Dictionary<string, ToolStripMenuItem> _miSettings = new();
 
     private readonly ToolStripMenuItem _miState = new() { Enabled = false };
+    private readonly ToolStripMenuItem _miSettingsRoot = new("设置");
     private readonly ToolStripMenuItem _miToggle = new("连接");
     private readonly ToolStripMenuItem _miExitNodes = new("出口节点");
     private readonly ToolStripMenuItem _miCopySelfV4 = new("复制本机 IPv4");
@@ -60,6 +69,9 @@ internal sealed class TrayAppContext : ApplicationContext
     public Icon AppIcon => GetIcon("normal");
 
     public TailscaleClient Client => _client;
+
+    /// <summary>正在刷新/测延迟。界面据此避免重复发起整轮扫描。</summary>
+    public bool IsBusy => _busy;
 
     public TrayAppContext(bool showWindowOnStart = false)
     {
@@ -139,7 +151,11 @@ internal sealed class TrayAppContext : ApplicationContext
 
         // 没有后台轮询，托盘里得留个手动刷新的入口
         var miRefresh = new ToolStripMenuItem("刷新状态");
-        miRefresh.Click += async (_, _) => await RefreshAsync();
+        miRefresh.Click += async (_, _) =>
+        {
+            if (!_busy)
+                await RefreshAsync();
+        };
         _menu.Items.Add(miRefresh);
 
         _miToggle.Click += async (_, _) => await ToggleAsync();
@@ -157,19 +173,18 @@ internal sealed class TrayAppContext : ApplicationContext
 
         _menu.Items.Add(new ToolStripSeparator());
 
-        var miSettings = new ToolStripMenuItem("设置");
         foreach (var spec in SettingsCatalog.All)
         {
             var item = new ToolStripMenuItem(spec.Label) { CheckOnClick = true, Tag = spec };
             item.Click += async (_, _) => await OnSettingMenuClicked(item, spec);
-            miSettings.DropDownItems.Add(item);
+            _miSettingsRoot.DropDownItems.Add(item);
             _miSettings[spec.Id] = item;
         }
 
-        miSettings.DropDownItems.Add(new ToolStripSeparator());
+        _miSettingsRoot.DropDownItems.Add(new ToolStripSeparator());
         _miReset.Click += async (_, _) => await ResetDefaultsAsync();
-        miSettings.DropDownItems.Add(_miReset);
-        _menu.Items.Add(miSettings);
+        _miSettingsRoot.DropDownItems.Add(_miReset);
+        _menu.Items.Add(_miSettingsRoot);
 
         var miTools = new ToolStripMenuItem("工具");
         var miToolsPage = new ToolStripMenuItem("打开工具页");
@@ -217,7 +232,7 @@ internal sealed class TrayAppContext : ApplicationContext
     }
 
     /// <param name="withLatency">用户主动刷新时为 true：顺手把在线设备的延迟也测一遍。</param>
-    public async Task<bool> RefreshAsync(bool withLatency = false)
+    public async Task<RefreshOutcome> RefreshAsync(bool withLatency = false)
     {
         if (_busy)
         {
@@ -226,7 +241,7 @@ internal sealed class TrayAppContext : ApplicationContext
             _refreshPending = true;
             _pendingWithLatency |= withLatency;
             _form?.SetStatus("正在刷新中，已排队再刷一次…");
-            return true;
+            return RefreshOutcome.Queued;   // 排队 ≠ 成功，不能拿去当失败计数
         }
 
         _busy = true;
@@ -235,7 +250,7 @@ internal sealed class TrayAppContext : ApplicationContext
             if (!_client.Available)
             {
                 ApplyUnavailable("未找到 tailscale.exe");
-                return false;
+                return RefreshOutcome.Failed;
             }
 
             var snapshot = await Task.Run(() => _client.Fetch());
@@ -247,14 +262,22 @@ internal sealed class TrayAppContext : ApplicationContext
             else
                 _form?.ShowRefreshStatus();
 
-            return true;
+            return RefreshOutcome.Completed;
         }
         catch (Exception ex)
         {
             Logger.Log("刷新失败: " + ex);
-            ApplyUnavailable("读取状态失败");
+
+            // 把真实原因带出来（权限不足 / 服务没起来），别只给一句"读取状态失败"
+            var reason = (ex.Message ?? "").Trim();
+            if (reason.Length > 120)
+                reason = reason[..120];
+            ApplyUnavailable(string.IsNullOrEmpty(reason)
+                ? "读取状态失败"
+                : "读取状态失败：" + reason);
+
             _form?.ShowRefreshStatus();
-            return false;
+            return RefreshOutcome.Failed;
         }
         finally
         {
@@ -412,9 +435,15 @@ internal sealed class TrayAppContext : ApplicationContext
         foreach (var spec in SettingsCatalog.All)
         {
             if (_miSettings.TryGetValue(spec.Id, out var item))
-                item.Checked = spec.Get(snapshot);
+                item.Checked = snapshot.PrefsLoaded && spec.Get(snapshot);
         }
         _updatingMenu = false;
+
+        // 旧版 tailscale.exe 没有 `get` 命令：这些勾选状态不可信，整体禁用
+        _miSettingsRoot.Enabled = snapshot.PrefsLoaded;
+        _miSettingsRoot.ToolTipText = snapshot.PrefsLoaded
+            ? ""
+            : "当前 Tailscale 版本不支持读取设置（需要 tailscale get），请升级客户端";
 
         FillExitNodeMenu(_miExitNodes.DropDownItems);
         _form?.UpdateView(snapshot, true);
@@ -422,9 +451,15 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void ApplyUnavailable(string message)
     {
+        // 关键：丢掉旧快照，否则再打开主窗口会把过期数据当实时数据画上去
+        _snap = null;
+
         _miState.Text = "状态：" + message;
         _tray.Icon = GetIcon("error");
-        _tray.Text = "Tailscale 中文托盘：" + message;
+
+        var tip = "Tailscale 中文托盘：" + message;
+        _tray.Text = tip.Length > 63 ? tip[..63] : tip;
+
         _miToggle.Enabled = false;
         _form?.UpdateError(message);
     }
@@ -457,7 +492,32 @@ internal sealed class TrayAppContext : ApplicationContext
         }
         else
         {
-            _client.Up();
+            var started = _client.Up((code, error) =>
+            {
+                if (code == 0)
+                    return;
+
+                // up 可能很慢（等登录），回调在后台线程上，必须切回 UI 线程弹窗
+                try
+                {
+                    _marshaller.BeginInvoke(new Action(() =>
+                        ShowCommandError("连接失败", error, "")));
+                }
+                catch
+                {
+                    // 程序正在退出时忽略
+                }
+            });
+
+            if (!started)
+            {
+                MessageBox.Show(
+                    "发起连接失败：无法启动 tailscale.exe，详情见日志。" + Environment.NewLine + Environment.NewLine +
+                    "日志位置：" + Logger.Dir,
+                    "Tailscale 中文托盘", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             MessageBox.Show(
                 "已发起连接。\n\n" +
                 "如果这台机器还没有登录 Tailscale，浏览器会自动打开授权页面；" +
@@ -499,6 +559,15 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         if (_updatingMenu)
             return;
+
+        if (_snap == null || !_snap.PrefsLoaded)
+        {
+            SetMenuCheck(spec, !item.Checked);
+            MessageBox.Show(
+                "当前 Tailscale 版本不支持读取设置（需要 tailscale get 命令），请先升级客户端。",
+                "修改设置", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
 
         var want = item.Checked;
         var confirm = spec.Confirm?.Invoke(want);
@@ -688,7 +757,7 @@ internal sealed class TrayAppContext : ApplicationContext
         try
         {
             Directory.CreateDirectory(Logger.Dir);
-            Process.Start(new ProcessStartInfo("explorer.exe", Logger.Dir) { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{Logger.Dir}\"") { UseShellExecute = true });
         }
         catch (Exception ex)
         {
@@ -702,6 +771,9 @@ internal sealed class TrayAppContext : ApplicationContext
         // 强行退出：先掐掉正在跑的延迟扫描和连接后的状态轮询，不等它们自己结束
         _closing = true;
         try { _scanCts?.Cancel(); } catch { }
+
+        // 退出前把最后一次拖动的列宽落盘（OnFormClosing 不会被调用）
+        try { _form?.PersistColumnWidths(); } catch { }
 
         try { _tray.Visible = false; _tray.Dispose(); } catch { }
 
@@ -755,27 +827,32 @@ internal sealed class TrayAppContext : ApplicationContext
 
     /// <summary>
     /// 刚发起连接时后端要经历 Starting 之类的过渡状态，只刷新一次界面会一直停在「正在启动…」。
-    /// 这里最多盯 30 秒，状态稳定就停；一直没稳定下来就提示用户检查 Tailscale 是否在运行。
+    /// 这里最多盯约 60 秒，状态稳定就停；一直没稳定下来就提示用户检查 Tailscale 是否在运行。
     /// </summary>
     private async Task PollUntilSettledAsync()
     {
         var failures = 0;
+        var deadline = DateTime.UtcNow.AddSeconds(60);
 
         _polling = true;
         try
         {
-            for (var i = 0; i < 15 && !_closing; i++)
+            while (!_closing && DateTime.UtcNow < deadline)
             {
                 await Task.Delay(2000);
                 if (_closing)
                     return;
 
-                var ok = await RefreshAsync();
+                var outcome = await RefreshAsync();
                 if (_closing)
                     return;
 
-                // 刷新连续失败说明连不上 tailscaled，再等也是空转
-                failures = ok ? 0 : failures + 1;
+                // 排队不算成功也不算失败；连续失败说明连不上 tailscaled，再等也是空转
+                if (outcome == RefreshOutcome.Failed)
+                    failures++;
+                else if (outcome == RefreshOutcome.Completed)
+                    failures = 0;
+
                 if (failures >= 2)
                     return;
 
@@ -784,7 +861,7 @@ internal sealed class TrayAppContext : ApplicationContext
                     state == "needslogin" || state == "needsmachineauth")
                     return;
 
-                // NoState / 空状态是终态：服务没起来，别等满 30 秒才说
+                // NoState / 空状态是终态：服务没起来，别等满 60 秒才说
                 if (state.Length == 0 || state == "nostate")
                 {
                     MessageBox.Show(
@@ -799,7 +876,7 @@ internal sealed class TrayAppContext : ApplicationContext
                 return;
 
             MessageBox.Show(
-                "等了 30 秒，连接状态还没稳定下来。" + Environment.NewLine + Environment.NewLine +
+                "等了约 1 分钟，连接状态还没稳定下来。" + Environment.NewLine + Environment.NewLine +
                 "如果 Tailscale 服务没有在运行，请先打开 Tailscale 客户端，再回来点「刷新」。",
                 "Tailscale 中文托盘", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }

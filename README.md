@@ -6,7 +6,7 @@
 > - **不接受任何提交** —— Issue 和 Pull Request 都已关闭，不必再提。
 > - **欢迎 Fork** —— 想继续改就自己 Fork 一份维护，不需要申请，注明出处即可。
 >
-> 归档前的最终版本是 **1.4.22**，功能完整、可直接使用；本项目不再修复问题、不再加新功能。
+> 归档前的最终版本是 **1.4.23**，功能完整、可直接使用；本项目不再修复问题、不再加新功能。
 
 ---
 
@@ -51,7 +51,7 @@ Tailscale 的 Windows 桌面客户端（`tailscale-ipn.exe`）是闭源的：
 - **密钥过期**：显示到期日期和剩余天数，30 天内会标红；永不过期的密钥显示「永不过期」。
 - **右键菜单**：复制 IPv4 / 复制 IPv6 / 复制全部 IP / 复制设备名 / 发送文件到这台 / 查看详情 / Ping / 设为出口节点。
 - **拖放发送**：把**一个**文件拖到设备行上直接发送；设备详情窗口里也有一块拖放区。文件夹和多选不支持，拖进去会提示。
-- 列宽改完会记住，下次启动保持（存在 `%LOCALAPPDATA%\TailscaleZHTray\columns.txt`）。
+- 列宽改完会记住，下次启动保持（存在 exe 同级 `data\columns.txt`）。
 
 ### 吉祥物
 
@@ -86,8 +86,9 @@ Windows 下把 `\` 换成 `^` 续行即可。
 TailscaleZHTray.exe --selftest
 ```
 
-结果写入 `%LOCALAPPDATA%\TailscaleZHTray\selftest.txt`，包含后端状态、本机 IP、全部设置项等原始读数。
-运行日志在 `%LOCALAPPDATA%\TailscaleZHTray\tray.log`。
+结果写入 exe 同级 `data\selftest.txt`，包含后端状态、本机 IP、全部设置项等原始读数。
+运行日志在 exe 同级 `data\tray.log`。
+（`data\` 目录不可写时——例如程序装在 `Program Files`——会自动回退到 `%LOCALAPPDATA%\TailscaleZHTray\`。）
 
 ## 代码结构
 

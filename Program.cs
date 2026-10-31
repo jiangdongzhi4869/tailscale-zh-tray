@@ -108,7 +108,8 @@ internal static class Program
                 $"prefs: acceptDns={snapshot.AcceptDns} acceptRoutes={snapshot.AcceptRoutes} " +
                 $"shieldsUp={snapshot.ShieldsUp} autoUpdate={snapshot.AutoUpdate} " +
                 $"unattended={snapshot.Unattended} exitNodeAllowLan={snapshot.ExitNodeAllowLanAccess} " +
-                $"advertiseExitNode={snapshot.AdvertiseExitNode} ssh={snapshot.RunSsh}");
+                $"advertiseExitNode={snapshot.AdvertiseExitNode} ssh={snapshot.RunSsh} " +
+                $"prefsLoaded={snapshot.PrefsLoaded}");
             sb.AppendLine("peers=" + snapshot.Peers.Count);
 
             foreach (var peer in snapshot.Peers.Take(10))
@@ -126,7 +127,18 @@ internal static class Program
             Logger.Log("selftest error: " + ex);
         }
 
-        Directory.CreateDirectory(Logger.Dir);
-        File.WriteAllText(Path.Combine(Logger.Dir, "selftest.txt"), sb.ToString(), new UTF8Encoding(false));
+        try
+        {
+            Directory.CreateDirectory(Logger.Dir);
+            File.WriteAllText(Path.Combine(Logger.Dir, "selftest.txt"), sb.ToString(), new UTF8Encoding(false));
+        }
+        catch (Exception ex)
+        {
+            // 这是 WinExe，没有控制台；写不进去必须让用户看见，而不是"双击没反应"
+            MessageBox.Show(
+                "自检结果写入失败：" + ex.Message + Environment.NewLine + Environment.NewLine +
+                "目标目录：" + Logger.Dir,
+                "Tailscale 中文托盘", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 }
