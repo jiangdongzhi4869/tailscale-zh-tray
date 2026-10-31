@@ -15,7 +15,6 @@ internal sealed class MainForm : Form
     private readonly TrayAppContext _ctx;
 
     private readonly Label _lblTitle = new();
-    private readonly Label _lblVersion = new();
     private readonly Label _lblState = new();
     private readonly Label _lblSelf = new();
     private readonly Label _lblExit = new();
@@ -100,14 +99,6 @@ internal sealed class MainForm : Form
         _lblTitle.AutoSize = true;
         _lblTitle.Location = new Point(20, 12);
         header.Controls.Add(_lblTitle);
-
-        _lblVersion.AutoSize = false;
-        _lblVersion.Size = new Size(340, 24);
-        _lblVersion.Location = new Point(580, 16);
-        _lblVersion.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        _lblVersion.TextAlign = ContentAlignment.MiddleRight;
-        _lblVersion.ForeColor = Color.Gray;
-        header.Controls.Add(_lblVersion);
 
         _lblState.AutoSize = true;
         _lblState.Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold);
@@ -531,10 +522,6 @@ internal sealed class MainForm : Form
 
         _lblExit.Text = "出口节点：" +
                         (string.IsNullOrWhiteSpace(snapshot.ExitNodeName) ? "未使用" : snapshot.ExitNodeName);
-
-        _lblVersion.Text = string.IsNullOrWhiteSpace(snapshot.Version)
-            ? ""
-            : "客户端 " + snapshot.Version;
 
         _authUrl = snapshot.AuthUrl ?? "";
         _lnkAuth.Visible = !string.IsNullOrWhiteSpace(_authUrl);
