@@ -5,9 +5,11 @@ namespace TailscaleZHTray;
 
 internal static class Logger
 {
+    // 便携化：日志与运行数据统一放在 exe 同级的 data 子目录，
+    // 不写系统用户目录，换机器时整个文件夹拷走即可。
     public static readonly string Dir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "TailscaleZHTray");
+        AppContext.BaseDirectory,
+        "data");
 
     public static readonly string FilePath = Path.Combine(Dir, "tray.log");
 
