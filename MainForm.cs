@@ -108,16 +108,19 @@ internal sealed class MainForm : Form
         _lblState.Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold);
         _lblState.ForeColor = Color.FromArgb(107, 114, 128);
         _lblState.Location = new Point(20, 50);
+        _lblState.Text = "正在读取状态…";   // 首次打开时不要留一块空白
         header.Controls.Add(_lblState);
 
         _lblSelf.AutoSize = true;
         _lblSelf.ForeColor = Color.FromArgb(55, 65, 81);
         _lblSelf.Location = new Point(20, 88);
+        _lblSelf.Text = "本机：—        地址：—";
         header.Controls.Add(_lblSelf);
 
         _lblExit.AutoSize = true;
         _lblExit.ForeColor = Color.FromArgb(55, 65, 81);
         _lblExit.Location = new Point(20, 112);
+        _lblExit.Text = "出口节点：—";
         header.Controls.Add(_lblExit);
 
         _lnkAuth.AutoSize = true;
@@ -395,7 +398,7 @@ internal sealed class MainForm : Form
         _lblPrefsWarning.ForeColor = Color.FromArgb(185, 28, 28);
         _lblPrefsWarning.Visible = false;
         _lblPrefsWarning.Text =
-            "当前 Tailscale 版本不支持读取设置（需要 `tailscale get` 命令），设置项已禁用，请升级客户端。";
+            "当前 Tailscale 版本不支持读取设置（需要 tailscale get 命令），设置项已禁用，请升级客户端。";
         page.Controls.Add(_lblPrefsWarning);
 
         var hint = new Label
@@ -548,6 +551,7 @@ internal sealed class MainForm : Form
             return;
 
         _snap = snapshot;
+        _btnToggle.Enabled = true;   // 刷新成功后恢复主按钮（UpdateError 里可能置灰过）
 
         var host = string.IsNullOrWhiteSpace(snapshot.HostName) ? "—" : snapshot.HostName;
         var ips = snapshot.SelfIps.Count > 0 ? string.Join("  /  ", snapshot.SelfIps) : "尚未分配";
@@ -1037,7 +1041,15 @@ internal sealed class MainForm : Form
         if (check.Tag is not ToggleSpec spec)
             return;
 
-        if (_snap == null || !_snap.PrefsLoaded)
+        if (_snap == null)
+        {
+            SetCheck(spec, !check.Checked);
+            MessageBox.Show(this, "状态尚未读取，请先点「刷新」。",
+                "修改设置", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (!_snap.PrefsLoaded)
         {
             SetCheck(spec, !check.Checked);
             MessageBox.Show(this,

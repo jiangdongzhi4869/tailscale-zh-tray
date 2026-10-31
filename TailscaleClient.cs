@@ -199,8 +199,18 @@ internal sealed class TailscaleSnapshot
         {
             if (string.IsNullOrWhiteSpace(ExitNodeIp))
                 return "";
-            var peer = Peers.FirstOrDefault(p => p.Ips.Contains(ExitNodeIp))
-                       ?? Peers.FirstOrDefault(p => p.ExitNode);
+
+            // "auto:any" / "auto:mullvad" / "auto:geo:us" 是表达式，不是设备 IP，不能拿去匹配
+            if (ExitNodeIp.StartsWith("auto:", StringComparison.Ordinal))
+            {
+                var expr = ExitNodeIp[5..];
+                return string.Equals(expr, "any", StringComparison.OrdinalIgnoreCase)
+                    ? "自动选择"
+                    : "自动选择（" + expr + "）";
+            }
+
+            // 只有 IP 能对上时才显示设备名；对不上就显示原始值，不做猜测
+            var peer = Peers.FirstOrDefault(p => p.Ips.Contains(ExitNodeIp));
             return peer != null ? peer.DisplayName : ExitNodeIp;
         }
     }

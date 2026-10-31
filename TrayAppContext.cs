@@ -50,6 +50,9 @@ internal sealed class TrayAppContext : ApplicationContext
     private MainForm _form;
     private ContextMenuStrip _exitMenu;
     private TailscaleSnapshot _snap;
+
+    /// <summary>最近一次刷新失败的原因，主窗口第一次打开时用它把错误显示出来。</summary>
+    private string _lastError;
     private bool _busy;
     private bool _probing;
     private bool _refreshPending;
@@ -405,6 +408,8 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void Apply()
     {
+        _lastError = null;
+
         var snapshot = _snap;
         if (snapshot == null)
             return;
@@ -452,6 +457,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private void ApplyUnavailable(string message)
     {
         // 关键：丢掉旧快照，否则再打开主窗口会把过期数据当实时数据画上去
+        _lastError = message;
         _snap = null;
 
         _miState.Text = "状态：" + message;
@@ -560,7 +566,15 @@ internal sealed class TrayAppContext : ApplicationContext
         if (_updatingMenu)
             return;
 
-        if (_snap == null || !_snap.PrefsLoaded)
+        if (_snap == null)
+        {
+            SetMenuCheck(spec, !item.Checked);
+            MessageBox.Show("状态尚未读取，请先点「刷新」。",
+                "修改设置", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (!_snap.PrefsLoaded)
         {
             SetMenuCheck(spec, !item.Checked);
             MessageBox.Show(
@@ -730,7 +744,10 @@ internal sealed class TrayAppContext : ApplicationContext
             _form.WindowState = FormWindowState.Normal;
         _form.Activate();
 
-        if (_snap != null)
+        // 窗口刚建好时 _snap 可能为空但错误还在，必须把错误画上去，别给一块白板
+        if (_lastError != null)
+            _form.UpdateError(_lastError);
+        else if (_snap != null)
             _form.UpdateView(_snap, _client.Available);
     }
 
